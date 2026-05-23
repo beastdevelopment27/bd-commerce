@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { fetchNui } from "@/utils/fetchNui";
 import { Pencil, Search, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { getImageUrl } from "@/utils/misc";
@@ -58,6 +59,11 @@ type CreateSaleResponse = {
   sale?: SaleItem;
 };
 
+type DeleteSaleResponse = {
+  ok: boolean;
+  message: string;
+};
+
 type SaleItem = {
   id: string;
   productName: string;
@@ -73,6 +79,7 @@ type SaleItem = {
   category?: string;
   startingPrice?: string;
   currentHighestBid?: string;
+  highestBidder?: string;
   auctionEndTime?: string;
   bidIncrement?: string;
   auctionStatus?: string;
@@ -162,6 +169,24 @@ const SaleCard = memo(function SaleCard({
     index % 2 === 0
       ? "bg-[var(--ds-accent-primary)]/20 text-[var(--ds-accent-primary)]"
       : "bg-[var(--ds-status-info)]/20 text-[var(--ds-status-info)]";
+  const isAuction = sale.saleType === "Auction";
+  const auctionStatus = (sale.auctionStatus || "open").trim().toLowerCase();
+  const hasAuctionBids =
+    (Number(sale.currentHighestBid) || 0) > 0 ||
+    (sale.highestBidder || "").trim() !== "";
+  const canDelete =
+    !isAuction ||
+    (auctionStatus !== "expired" &&
+      auctionStatus !== "completed" &&
+      !hasAuctionBids);
+  const saleTypeLabel =
+    sale.saleType === "Person"
+      ? "Personal Sale"
+      : sale.saleType === "Job"
+        ? "Job Sale"
+        : sale.saleType === "Auction"
+          ? "Auction"
+          : "Public Sale";
 
   return (
     <div className="group flex h-full flex-col rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-elevated)]/45 p-3">
@@ -193,13 +218,26 @@ const SaleCard = memo(function SaleCard({
         <p className="truncate text-base font-semibold text-[var(--ds-text-primary)]">
           {sale.productName}
         </p>
-        <p className="truncate text-xs text-[var(--ds-text-secondary)]">
-          {sale.saleType === "Person"
-            ? "Personal Sale"
-            : sale.saleType === "Job"
-              ? "Job Sale"
-              : "Public Sale"}
-        </p>
+        <p className="truncate text-xs text-[var(--ds-text-secondary)]">{saleTypeLabel}</p>
+        {isAuction ? (
+          <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--ds-text-muted)]">
+            {auctionStatus === "open"
+              ? "Bidding open"
+              : auctionStatus === "expired"
+                ? "Ended · no bids"
+                : auctionStatus === "completed"
+                  ? "Ended · sold"
+                  : auctionStatus}
+          </p>
+        ) : null}
+        {isAuction && auctionStatus === "expired" ? (
+          <Link
+            to="/claims"
+            className="mt-1 inline-block text-xs font-medium text-[var(--ds-accent-primary)] hover:underline"
+          >
+            Collect items on Claims →
+          </Link>
+        ) : null}
         <p
           className="mt-1 line-clamp-2 min-h-[1rem] max-h-[1rem] overflow-hidden text-xs text-[var(--ds-text-muted)]"
           title={sale.description}
@@ -238,8 +276,18 @@ const SaleCard = memo(function SaleCard({
           <Button
             size="sm"
             variant="ghost"
-            className="h-9 flex-1 rounded-md px-3 text-[var(--ds-status-error)] hover:bg-[var(--ds-status-error-soft)] hover:text-[var(--ds-status-error)]"
+            className="h-9 flex-1 rounded-md px-3 text-[var(--ds-status-error)] hover:bg-[var(--ds-status-error-soft)] hover:text-[var(--ds-status-error)] disabled:opacity-40"
             onClick={() => onDelete(sale.id)}
+            disabled={!canDelete}
+            title={
+              !canDelete
+                ? auctionStatus === "expired"
+                  ? "Auction ended with no bids — use Claims to get your stock back"
+                  : auctionStatus === "completed"
+                    ? "Auction sold — winner collects on Claims"
+                    : "Cannot delete an auction that has bids"
+                : "Remove listing"
+            }
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -801,9 +849,34 @@ export default function SaleTab() {
     setOpen(true);
   }, [sales]);
 
-  const handleDelete = useCallback((saleId: string) => {
+  const handleDelete = useCallback(async (saleId: string) => {
+    setSubmitError("");
+    const response = await fetchNui<DeleteSaleResponse>(
+      "deleteSale",
+      { id: saleId },
+      {
+        ok: true,
+        message: "Sale removed. Collect your items on the Claims page.",
+      },
+    ).catch(
+      (): DeleteSaleResponse => ({
+        ok: false,
+        message: "Failed to delete sale.",
+      }),
+    );
+
+    if (!isMountedRef.current) return;
+    if (!response.ok) {
+      setSubmitError(response.message || "Failed to delete sale.");
+      return;
+    }
+
     setSales((prev) => prev.filter((sale) => sale.id !== saleId));
-  }, []);
+    if (editingSaleId === saleId) {
+      setEditingSaleId(null);
+      setOpen(false);
+    }
+  }, [editingSaleId]);
 
   return (
     <>

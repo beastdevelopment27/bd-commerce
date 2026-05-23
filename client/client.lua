@@ -56,6 +56,7 @@ for _, eventName in ipairs({
   'bd_commerce:client:adminUpdateSaleResult',
   'bd_commerce:client:getPublicSalesResult',
   'bd_commerce:client:adminDeleteSaleResult',
+  'bd_commerce:client:deleteSaleResult',
   'bd_commerce:client:searchPlayerTargetsResult',
   'bd_commerce:client:checkPlayerTargetStatusResult',
   'bd_commerce:client:getJobTargetsResult',
@@ -73,6 +74,8 @@ for _, eventName in ipairs({
   'bd_commerce:client:moderateReportActionResult',
   'bd_commerce:client:getAuctionDetailsResult',
   'bd_commerce:client:placeBidResult',
+  'bd_commerce:client:getPendingClaimsResult',
+  'bd_commerce:client:claimCommerceItemResult',
 }) do
   RegisterNetEvent(eventName, function(requestId, response)
     resolvePendingRequest(requestId, response)
@@ -166,6 +169,10 @@ RegisterNUICallback('adminDeleteSale', function(data, cb)
   sendServerRequest(cb, 'bd_commerce:server:adminDeleteSale', data or {}, 'Server timed out while deleting admin sale.')
 end)
 
+RegisterNUICallback('deleteSale', function(data, cb)
+  sendServerRequest(cb, 'bd_commerce:server:deleteSale', data or {}, 'Server timed out while deleting sale.')
+end)
+
 RegisterNUICallback('getPublicSales', function(_, cb)
   sendServerRequest(cb, 'bd_commerce:server:getPublicSales', nil, 'Server timed out while loading public sales.', function()
     return { sales = {} }
@@ -254,4 +261,14 @@ end)
 
 RegisterNUICallback('placeBid', function(data, cb)
   sendServerRequest(cb, 'bd_commerce:server:placeBid', data or {}, 'Server timed out while placing bid.')
+end)
+
+RegisterNUICallback('getPendingClaims', function(_, cb)
+  sendServerRequest(cb, 'bd_commerce:server:getPendingClaims', nil, 'Server timed out while loading claims.', function()
+    return { claims = {} }
+  end)
+end)
+
+RegisterNUICallback('claimCommerceItem', function(data, cb)
+  sendServerRequest(cb, 'bd_commerce:server:claimCommerceItem', data or {}, 'Server timed out while claiming item.')
 end)

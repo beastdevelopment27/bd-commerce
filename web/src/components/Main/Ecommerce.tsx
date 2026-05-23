@@ -6,15 +6,15 @@ import {
   LucideIcon,
   LayoutDashboard,
   ShoppingCart,
+  PackageCheck,
   Handshake,
   TicketPercent,
   ShieldCheck,
-  Gavel,
   ShieldAlert,
 } from "lucide-react";
 import {
-  NavLink,
   Navigate,
+  NavLink,
   Outlet,
   Route,
   Routes,
@@ -24,8 +24,8 @@ import BuyListing from "@/components/Form/BuyListing";
 import DashBoard from "@/components/Form/DashBoard";
 import SaleTab from "@/components/Form/SaleTab";
 import { EcommercePanelHeader } from "@/components/Main/EcommercePanelHeader";
+import Claims from "../Form/Claims";
 import Coupon from "../Form/Coupon";
-import Auction from "../Form/Auction";
 import Reports from "../Form/Reports";
 
 type NavItem =
@@ -35,11 +35,11 @@ type NavItem =
 const SIDEBAR_ITEMS: NavItem[] = [
   { to: "/dashboard", icon: LayoutDashboard },
   { to: "/buy-listing", icon: ShoppingCart },
+  { to: "/claims", icon: PackageCheck },
   { to: "/sale-tab", icon: Handshake },
   { to: "/coupen-code", icon: TicketPercent },
   { to: "/admin-sale", icon: ShieldCheck },
   { to: "/reports", icon: ShieldAlert },
-  { to: "/auction", icon: Gavel },
 ];
 
 function navItemClassName(isActive: boolean) {
@@ -149,15 +149,14 @@ export default function Ecommerce() {
   return (
     <Routes>
       <Route path="/" element={<EcommerceShell />}>
-        <Route index element={<Navigate to="/buy-listing" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashBoard />} />
         <Route path="buy-listing" element={<BuyListing />} />
+        <Route path="claims" element={<Claims />} />
         <Route path="admin-sale" element={<AdminSale />} />
         <Route path="sale-tab" element={<SaleTab />} />
         <Route path="coupen-code" element={<Coupon />} />
-        <Route path="auction" element={<Auction />} />
         <Route path="reports" element={<Reports />} />
-        <Route path="*" element={<Navigate to="/buy-listing" replace />} />
       </Route>
     </Routes>
   );

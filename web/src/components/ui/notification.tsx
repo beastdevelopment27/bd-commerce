@@ -26,7 +26,7 @@ const DEFAULT_DURATION = 4000;
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const addNotification = React.useCallback(
     (type: NotificationType, title: string, message?: string, duration = DEFAULT_DURATION) => {
-      // Use server-side notification flow instead of React UI toast.
+      // Routes to game notification (config/notifications.lua → client/notifications.lua).
       const text = message && message.length > 0 ? `${title}: ${message}` : title;
       fetchNui("notifyServer", { message: text, type, duration }).catch(() => {});
     },

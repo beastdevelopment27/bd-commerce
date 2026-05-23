@@ -8,6 +8,7 @@ local RATING_STATS_TABLE = 'bd_commerce_seller_rating_stats'
 local BIDS_TABLE = 'bd_commerce_bids'
 local REPORT_TABLE = 'bd_commerce_reports'
 local BLOCKED_SELLERS_TABLE = 'bd_commerce_blocked_sellers'
+local CLAIMS_TABLE = 'bd_commerce_claims'
 local ESX = nil
 local CACHE = {
   dashboard = {},
@@ -42,6 +43,15 @@ local ACTIVE_ADMIN_REQUESTS = {}
 local ACTIVE_SALE_CHECKOUT_LOCKS = {}
 local NAME_CACHE_MAX_KEYS = 3000
 local REPORT_LAST_SUBMIT_AT = {}
+
+local function notifyPlayer(src, notifyType, title, message)
+  if type(CommerceNotify) ~= 'function' then return end
+  CommerceNotify(src, {
+    type = notifyType,
+    title = title,
+    message = message,
+  })
+end
 
 CreateThread(function()
   if GetResourceState('es_extended') == 'started' then
@@ -879,6 +889,117 @@ local function parseSaleId(saleId)
   local normalized = sanitizeString(saleId)
   local numeric = normalized:match('^sale%-(%d+)$') or normalized:match('^(%d+)$')
   return tonumber(numeric)
+end
+
+local function parseClaimId(claimId)
+  local normalized = sanitizeString(tostring(claimId or ''))
+  local numeric = normalized:match('^claim%-(%d+)$') or normalized:match('^(%d+)$')
+  return tonumber(numeric)
+end
+
+local CLAIM_TYPE_LABELS = {
+  auction_win = 'Auction won',
+  listing_removed = 'Listing removed',
+  auction_expired = 'Auction ended (no bids)',
+}
+
+local function rowToClaim(row)
+  local claimType = sanitizeString(tostring(row.claim_type or ''))
+  return {
+    id = ('claim-%s'):format(row.id),
+    claimType = claimType,
+    claimTypeLabel = CLAIM_TYPE_LABELS[claimType] or claimType,
+    inventoryItem = tostring(row.inventory_item or ''),
+    quantity = tonumber(row.quantity) or 0,
+    productName = tostring(row.product_name or ''),
+    saleId = row.sale_id and ('sale-%s'):format(row.sale_id) or nil,
+    sourceNote = tostring(row.source_note or ''),
+    createdAt = row.created_at and tostring(row.created_at) or nil,
+  }
+end
+
+local function hasPendingClaim(recipientIdentifier, saleId, claimType)
+  if recipientIdentifier == '' or not saleId or claimType == '' then
+    return false
+  end
+  local existing = MySQL.scalar.await(
+    ('SELECT id FROM `%s` WHERE recipient_identifier = ? AND sale_id = ? AND claim_type = ? AND claimed_at IS NULL LIMIT 1'):format(CLAIMS_TABLE),
+    { recipientIdentifier, saleId, claimType }
+  )
+  return existing ~= nil
+end
+
+local function createPendingClaim(recipientIdentifier, claimType, inventoryItem, quantity, productName, saleId, sourceNote)
+  recipientIdentifier = sanitizeString(tostring(recipientIdentifier or ''))
+  claimType = sanitizeString(tostring(claimType or ''))
+  inventoryItem = sanitizeString(tostring(inventoryItem or ''))
+  productName = sanitizeString(tostring(productName or ''))
+  sourceNote = sanitizeString(tostring(sourceNote or ''))
+  quantity = math.floor(tonumber(quantity) or 0)
+  saleId = tonumber(saleId)
+
+  if recipientIdentifier == '' or claimType == '' or inventoryItem == '' or quantity < 1 then
+    return false
+  end
+
+  if saleId and hasPendingClaim(recipientIdentifier, saleId, claimType) then
+    return false
+  end
+
+  if saleId then
+    local anyPendingForSale = MySQL.scalar.await(
+      ('SELECT id FROM `%s` WHERE sale_id = ? AND recipient_identifier = ? AND claimed_at IS NULL LIMIT 1'):format(CLAIMS_TABLE),
+      { saleId, recipientIdentifier }
+    )
+    if anyPendingForSale then
+      return false
+    end
+  end
+
+  MySQL.insert.await(
+    ('INSERT INTO `%s` (recipient_identifier, claim_type, inventory_item, quantity, product_name, sale_id, source_note) VALUES (?, ?, ?, ?, ?, ?, ?)'):format(CLAIMS_TABLE),
+    { recipientIdentifier, claimType, inventoryItem, quantity, productName, saleId, sourceNote }
+  )
+  return true
+end
+
+local function queueSellerListingReturnClaim(saleRow, sourceNote)
+  if type(saleRow) ~= 'table' then return false end
+  local sellerIdentifier = tostring(saleRow.owner_identifier or '')
+  local inventoryItem = tostring(saleRow.inventory_item or '')
+  local quantity = tonumber(saleRow.quantity) or 0
+  local productName = tostring(saleRow.product_name or '')
+  local saleId = tonumber(saleRow.id)
+  if sellerIdentifier == '' or inventoryItem == '' or quantity < 1 or not saleId then
+    return false
+  end
+  return createPendingClaim(sellerIdentifier, 'listing_removed', inventoryItem, quantity, productName, saleId, sourceNote)
+end
+
+local function queueAuctionWinClaim(saleRow)
+  if type(saleRow) ~= 'table' then return false end
+  local winnerIdentifier = tostring(saleRow.highest_bidder or '')
+  local inventoryItem = tostring(saleRow.inventory_item or '')
+  local quantity = tonumber(saleRow.quantity) or 0
+  local productName = tostring(saleRow.product_name or '')
+  local saleId = tonumber(saleRow.id)
+  if winnerIdentifier == '' or inventoryItem == '' or quantity < 1 or not saleId then
+    return false
+  end
+  return createPendingClaim(winnerIdentifier, 'auction_win', inventoryItem, quantity, productName, saleId, 'Won auction')
+end
+
+local function queueExpiredAuctionSellerClaim(saleRow)
+  if type(saleRow) ~= 'table' then return false end
+  local sellerIdentifier = tostring(saleRow.owner_identifier or '')
+  local inventoryItem = tostring(saleRow.inventory_item or '')
+  local quantity = tonumber(saleRow.quantity) or 0
+  local productName = tostring(saleRow.product_name or '')
+  local saleId = tonumber(saleRow.id)
+  if sellerIdentifier == '' or inventoryItem == '' or quantity < 1 or not saleId then
+    return false
+  end
+  return createPendingClaim(sellerIdentifier, 'auction_expired', inventoryItem, quantity, productName, saleId, 'Auction expired with no winning bid')
 end
 
 local function buildSqlPlaceholders(count)
@@ -2706,6 +2827,13 @@ RegisterNetEvent('bd_commerce:server:moderateReportAction', function(requestId, 
   local sellerId = tostring(reportRow.seller_id or '')
 
   if action == 'remove_listing' then
+    local listingRow = MySQL.single.await(
+      ('SELECT id, owner_identifier, inventory_item, product_name, quantity FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
+      { listingId }
+    )
+    if listingRow then
+      queueSellerListingReturnClaim(listingRow, 'Listing removed by moderation')
+    end
     MySQL.update.await(
       ('DELETE FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
       { listingId }
@@ -3043,7 +3171,7 @@ RegisterNetEvent('bd_commerce:server:createSale', function(requestId, payload)
         '',
         isAuction and auctionEndAt or nil,
         isAuction and (tonumber(validated.bidIncrement) or 1) or 1,
-        isAuction and 'open' or nil,
+        isAuction and 'open' or '',
       }
     )
   end)
@@ -3240,7 +3368,7 @@ RegisterNetEvent('bd_commerce:server:updateSale', function(requestId, payload)
       '',
       isAuction and auctionEndAt or nil,
       isAuction and (tonumber(saleData.bidIncrement) or 1) or 1,
-      isAuction and 'open' or nil,
+      isAuction and 'open' or '',
       dbSaleId,
       ownerIdentifier,
     }
@@ -3497,7 +3625,7 @@ RegisterNetEvent('bd_commerce:server:adminUpdateSale', function(requestId, paylo
       '',
       isAuction and auctionEndAt or nil,
       isAuction and (tonumber(saleData.bidIncrement) or 1) or 1,
-      isAuction and 'open' or nil,
+      isAuction and 'open' or '',
       dbSaleId,
     }
   )
@@ -3531,6 +3659,123 @@ RegisterNetEvent('bd_commerce:server:adminUpdateSale', function(requestId, paylo
   })
 end)
 
+local function canOwnerDeleteSaleRow(row)
+  if type(row) ~= 'table' then
+    return false, 'Sale not found.'
+  end
+
+  if tostring(row.sale_type or '') == 'Auction' then
+    local auctionStatus = sanitizeString(tostring(row.auction_status or '')):lower()
+    if auctionStatus == 'completed' then
+      return false, 'This auction was won by a bidder. The winner collects the item on Claims.'
+    end
+    if auctionStatus == 'expired' then
+      return false, 'This auction ended with no bids. Collect your stock on the Claims page.'
+    end
+    local highestBid = tonumber(row.current_highest_bid) or 0
+    local highestBidder = sanitizeString(tostring(row.highest_bidder or ''))
+    if highestBid > 0 or highestBidder ~= '' then
+      return false, 'You cannot delete an auction that already has bids.'
+    end
+  end
+
+  return true, nil
+end
+
+local function deleteSaleRowWithClaim(row, sourceNote)
+  if type(row) ~= 'table' then
+    return false, 'Sale not found.'
+  end
+
+  local dbSaleId = tonumber(row.id)
+  if not dbSaleId then
+    return false, 'Invalid sale id.'
+  end
+
+  local quantity = tonumber(row.quantity) or 0
+  if quantity > 0 and tostring(row.inventory_item or '') ~= '' then
+    queueSellerListingReturnClaim(row, sourceNote)
+  end
+
+  local deletedRows = MySQL.update.await(
+    ('DELETE FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
+    { dbSaleId }
+  )
+  if not deletedRows or deletedRows < 1 then
+    return false, 'Could not delete sale.'
+  end
+
+  return true, nil
+end
+
+RegisterNetEvent('bd_commerce:server:deleteSale', function(requestId, payload)
+  local src = source
+  local responseEvent = 'bd_commerce:client:deleteSaleResult'
+
+  if type(requestId) ~= 'string' or requestId == '' then
+    TriggerClientEvent(responseEvent, src, requestId or '', {
+      ok = false,
+      message = 'Invalid request id.',
+    })
+    return
+  end
+
+  local dbSaleId = parseSaleId(type(payload) == 'table' and payload.id or '')
+  if not dbSaleId then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Invalid sale id.',
+    })
+    return
+  end
+
+  local ownerIdentifier = getOwnerIdentifier(src)
+  if isSellerBlocked(ownerIdentifier) then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Your seller account is blocked from managing listings.',
+    })
+    return
+  end
+
+  local row = MySQL.single.await(
+    ('SELECT id, owner_identifier, inventory_item, product_name, quantity, sale_type, auction_status, current_highest_bid, highest_bidder FROM `%s` WHERE id = ? AND owner_identifier = ? LIMIT 1'):format(TABLE_NAME),
+    { dbSaleId, ownerIdentifier }
+  )
+  if not row then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Sale not found or you are not the owner.',
+    })
+    return
+  end
+
+  local canDelete, deleteError = canOwnerDeleteSaleRow(row)
+  if not canDelete then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = deleteError,
+    })
+    return
+  end
+
+  local deleted, deleteFailure = deleteSaleRowWithClaim(row, 'Listing removed by seller')
+  if not deleted then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = deleteFailure or 'Could not delete sale.',
+    })
+    return
+  end
+
+  invalidateCommerceCaches(ownerIdentifier, src)
+  notifyPlayer(src, 'info', 'Listing removed', 'Collect your items on the Claims page.')
+  TriggerClientEvent(responseEvent, src, requestId, {
+    ok = true,
+    message = 'Sale removed. Collect your items on the Claims page.',
+  })
+end)
+
 RegisterNetEvent('bd_commerce:server:adminDeleteSale', function(requestId, payload)
   local src = source
   local responseEvent = 'bd_commerce:client:adminDeleteSaleResult'
@@ -3554,7 +3799,7 @@ RegisterNetEvent('bd_commerce:server:adminDeleteSale', function(requestId, paylo
 
   local queryStart = queryTimerStart()
   local row = MySQL.single.await(
-    ('SELECT id, owner_identifier, inventory_item, quantity FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
+    ('SELECT id, owner_identifier, inventory_item, product_name, quantity, sale_type, auction_status, current_highest_bid, highest_bidder FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
     { dbSaleId }
   )
   queryTimerEnd(queryStart, 'adminDeleteSaleSelect')
@@ -3567,30 +3812,119 @@ RegisterNetEvent('bd_commerce:server:adminDeleteSale', function(requestId, paylo
   end
 
   local deleteStart = queryTimerStart()
-  local deletedRows = MySQL.update.await(
-    ('DELETE FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
-    { dbSaleId }
-  )
+  local deleted, deleteFailure = deleteSaleRowWithClaim(row, 'Listing deleted by admin')
   queryTimerEnd(deleteStart, 'adminDeleteSaleDelete')
 
-  if not deletedRows or deletedRows < 1 then
+  if not deleted then
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = false,
-      message = 'Could not delete sale.',
+      message = deleteFailure or 'Could not delete sale.',
     })
     return
-  end
-
-  local quantity = tonumber(row.quantity) or 0
-  local ownerSource = findPlayerByCharacterIdentifier(tostring(row.owner_identifier or ''))
-  if ownerSource and quantity > 0 and tostring(row.inventory_item or '') ~= '' then
-    addInventoryItem(ownerSource, tostring(row.inventory_item), quantity)
   end
 
   invalidateCommerceCaches(tostring(row.owner_identifier or ''), src)
   TriggerClientEvent(responseEvent, src, requestId, {
     ok = true,
-    message = 'Sale deleted successfully.',
+    message = 'Sale deleted successfully. Stock was added to the seller claims page.',
+  })
+end)
+
+RegisterNetEvent('bd_commerce:server:getPendingClaims', function(requestId)
+  local src = source
+  local responseEvent = 'bd_commerce:client:getPendingClaimsResult'
+  if type(requestId) ~= 'string' or requestId == '' then
+    TriggerClientEvent(responseEvent, src, requestId or '', { ok = false, message = 'Invalid request id.', claims = {} })
+    return
+  end
+
+  local recipientIdentifier = getOwnerIdentifier(src)
+  if recipientIdentifier == '' then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Could not resolve your character.', claims = {} })
+    return
+  end
+
+  local rows = MySQL.query.await(
+    ('SELECT * FROM `%s` WHERE recipient_identifier = ? AND claimed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 100'):format(CLAIMS_TABLE),
+    { recipientIdentifier }
+  ) or {}
+
+  local claims = {}
+  for _, row in ipairs(rows) do
+    claims[#claims + 1] = rowToClaim(row)
+  end
+
+  TriggerClientEvent(responseEvent, src, requestId, {
+    ok = true,
+    message = 'Pending claims loaded.',
+    claims = claims,
+  })
+end)
+
+RegisterNetEvent('bd_commerce:server:claimCommerceItem', function(requestId, payload)
+  local src = source
+  local responseEvent = 'bd_commerce:client:claimCommerceItemResult'
+  if type(requestId) ~= 'string' or requestId == '' then
+    TriggerClientEvent(responseEvent, src, requestId or '', { ok = false, message = 'Invalid request id.' })
+    return
+  end
+
+  local claimId = parseClaimId(type(payload) == 'table' and payload.id or '')
+  if not claimId then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Invalid claim id.' })
+    return
+  end
+
+  local recipientIdentifier = getOwnerIdentifier(src)
+  if recipientIdentifier == '' then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Could not resolve your character.' })
+    return
+  end
+
+  local row = MySQL.single.await(
+    ('SELECT * FROM `%s` WHERE id = ? AND recipient_identifier = ? AND claimed_at IS NULL LIMIT 1'):format(CLAIMS_TABLE),
+    { claimId, recipientIdentifier }
+  )
+  if not row then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Claim not found or already collected.' })
+    return
+  end
+
+  local inventoryItem = tostring(row.inventory_item or '')
+  local quantity = tonumber(row.quantity) or 0
+  if inventoryItem == '' or quantity < 1 then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Invalid claim item data.' })
+    return
+  end
+
+  if not addInventoryItem(src, inventoryItem, quantity) then
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Could not add items to your inventory. Make sure you have space.' })
+    return
+  end
+
+  local marked = MySQL.update.await(
+    ('UPDATE `%s` SET claimed_at = UTC_TIMESTAMP() WHERE id = ? AND recipient_identifier = ? AND claimed_at IS NULL'):format(CLAIMS_TABLE),
+    { claimId, recipientIdentifier }
+  )
+  if not marked or marked < 1 then
+    removeInventoryItem(src, inventoryItem, quantity)
+    TriggerClientEvent(responseEvent, src, requestId, { ok = false, message = 'Claim could not be completed. Please try again.' })
+    return
+  end
+
+  local saleId = tonumber(row.sale_id)
+  local claimType = sanitizeString(tostring(row.claim_type or ''))
+  if saleId and (claimType == 'auction_win' or claimType == 'auction_expired' or claimType == 'listing_removed') then
+    MySQL.update.await(('DELETE FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME), { saleId })
+  end
+
+  invalidateCommerceCaches(recipientIdentifier, src)
+  local claimMessage = ('Claimed %dx %s successfully.'):format(quantity, tostring(row.product_name or inventoryItem))
+  notifyPlayer(src, 'success', 'Claim', claimMessage)
+  TriggerClientEvent(responseEvent, src, requestId, {
+    ok = true,
+    message = claimMessage,
+    claim = rowToClaim(row),
   })
 end)
 
@@ -3856,18 +4190,34 @@ CreateThread(function()
           ('UPDATE `%s` SET auction_status = ? WHERE id = ? AND sale_type = ? AND (auction_status = ? OR auction_status IS NULL OR auction_status = \'\')'):format(TABLE_NAME),
           { nextStatus, saleId, 'Auction', 'open' }
         )
-        if done and done > 0 and hasWinner then
-          local sellerIdentifier = tostring(row.owner_identifier or '')
-          local taxPercent = getCommerceTaxPercent()
-          local netAmount = roundCurrency(highestBid * ((100 - taxPercent) / 100))
-          addSellerWalletBalance(sellerIdentifier, netAmount)
-          MySQL.insert.await(
-            ('INSERT INTO `%s` (buyer_identifier, seller_identifier, sale_id, product_name, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?)'):format(PURCHASE_TABLE),
-            { highestBidder, sellerIdentifier, saleId, tostring(row.product_name or ''), tonumber(row.quantity) or 1, highestBid }
-          )
-          local winnerSource = findPlayerByCharacterIdentifier(highestBidder)
-          if winnerSource then
-            addInventoryItem(winnerSource, tostring(row.inventory_item or ''), tonumber(row.quantity) or 1)
+        if done and done > 0 then
+          if hasWinner then
+            local sellerIdentifier = tostring(row.owner_identifier or '')
+            local taxPercent = getCommerceTaxPercent()
+            local netAmount = roundCurrency(highestBid * ((100 - taxPercent) / 100))
+            addSellerWalletBalance(sellerIdentifier, netAmount)
+            MySQL.insert.await(
+              ('INSERT INTO `%s` (buyer_identifier, seller_identifier, sale_id, product_name, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?)'):format(PURCHASE_TABLE),
+              { highestBidder, sellerIdentifier, saleId, tostring(row.product_name or ''), tonumber(row.quantity) or 1, highestBid }
+            )
+            row.id = saleId
+            row.highest_bidder = highestBidder
+            queueAuctionWinClaim(row)
+            local winnerSource = findPlayerByCharacterIdentifier(highestBidder)
+            if winnerSource then
+              notifyPlayer(winnerSource, 'success', 'Auction won', 'You won an auction. Collect the item on Claims.')
+            end
+            local sellerSource = findPlayerByCharacterIdentifier(sellerIdentifier)
+            if sellerSource then
+              notifyPlayer(sellerSource, 'success', 'Auction sold', ('Your auction sold for $%.2f.'):format(highestBid))
+            end
+          else
+            row.id = saleId
+            queueExpiredAuctionSellerClaim(row)
+            local sellerSource = findPlayerByCharacterIdentifier(tostring(row.owner_identifier or ''))
+            if sellerSource then
+              notifyPlayer(sellerSource, 'info', 'Auction ended', 'No bids received. Collect your stock on Claims.')
+            end
           end
         end
       end

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom';
 import { VisibilityProvider } from './providers/VisibilityProvider';
 import { NotificationProvider } from './components/ui/notification';
 import App from './components/App';
@@ -11,7 +11,7 @@ import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter
+    <HashRouter
       future={{
         v7_startTransition: true,
         v7_relativeSplatPath: true,
@@ -22,6 +22,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <App />
         </NotificationProvider>
       </VisibilityProvider>
-    </BrowserRouter>
+    </HashRouter>
   </React.StrictMode>,
 );

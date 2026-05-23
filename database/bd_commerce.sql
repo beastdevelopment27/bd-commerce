@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS `bd_commerce_claims`;
 DROP TABLE IF EXISTS `bd_commerce_blocked_sellers`;
 DROP TABLE IF EXISTS `bd_commerce_reports`;
 DROP TABLE IF EXISTS `bd_commerce_bids`;
@@ -24,7 +25,7 @@ CREATE TABLE `bd_commerce_sales` (
   `highest_bidder` VARCHAR(80) NOT NULL DEFAULT '',
   `auction_end_time` TIMESTAMP NULL DEFAULT NULL,
   `bid_increment` DECIMAL(10,2) NOT NULL DEFAULT 1.00,
-  `auction_status` VARCHAR(16) NOT NULL DEFAULT 'open',
+  `auction_status` VARCHAR(16) NULL DEFAULT NULL,
   `image` VARCHAR(255) NOT NULL DEFAULT '',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -123,6 +124,22 @@ CREATE TABLE `bd_commerce_reports` (
   KEY `idx_reports_reason` (`reason`),
   KEY `idx_reports_listing` (`listing_id`),
   KEY `idx_reports_seller` (`seller_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `bd_commerce_claims` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `recipient_identifier` VARCHAR(80) NOT NULL,
+  `claim_type` VARCHAR(32) NOT NULL,
+  `inventory_item` VARCHAR(100) NOT NULL,
+  `quantity` INT NOT NULL,
+  `product_name` VARCHAR(100) NOT NULL DEFAULT '',
+  `sale_id` INT NULL DEFAULT NULL,
+  `source_note` VARCHAR(255) NOT NULL DEFAULT '',
+  `claimed_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_claims_recipient_pending` (`recipient_identifier`, `claimed_at`),
+  KEY `idx_claims_sale` (`sale_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `bd_commerce_blocked_sellers` (
