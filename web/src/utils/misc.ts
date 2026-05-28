@@ -1,3 +1,5 @@
+import { getCommerceImagePath } from "@/lib/commerceConfig";
+
 // Will return whether the current environment is in a regular browser
 // and not CEF
 export const isEnvBrowser = (): boolean => !(window as any).invokeNative;
@@ -20,5 +22,6 @@ export const getImageUrl = (
         return fallback;
     }
 
-    return `nui://${inventoryPath}/${image}` || fallback;
+    const path = inventoryPath ?? getCommerceImagePath();
+    return `nui://${path}/${image}` || fallback;
 };

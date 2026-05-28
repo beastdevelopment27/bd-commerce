@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import { Pencil, Search, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { setCommerceImagePath } from "@/lib/commerceConfig";
 import { getImageUrl } from "@/utils/misc";
 import { saleTabMockSales } from "@/mocks/saleTabMockData";
 
@@ -90,6 +92,7 @@ type InventoryItem = {
   label: string;
   count: number;
   image?: string;
+  restricted?: boolean;
 };
 
 type InventoryItemsResponse = {
@@ -137,6 +140,7 @@ type CommerceMetaResponse = {
   ok: boolean;
   message: string;
   categories: Array<{ id: string; label: string }>;
+  inventoryImagePath?: string;
 };
 
 type SaleCardProps = {
@@ -193,11 +197,7 @@ const SaleCard = memo(function SaleCard({
       <div className="relative mb-3 flex h-36 items-center justify-center rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-card)]/60 p-2">
         {sale.image ? (
           <img
-            src={getImageUrl(
-              `${sale.inventoryItem}.png` as string,
-              "ox_inventory/web/images",
-              placeholderItemImage,
-            )}
+            src={getImageUrl(`${sale.inventoryItem}.png` as string, undefined, placeholderItemImage)}
             alt={sale.productName}
             className="h-full w-full rounded-md object-contain"
             onError={(event) => {
@@ -318,6 +318,7 @@ export default function SaleTab() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [jobTargetOptions, setJobTargetOptions] = useState<JobTargetOption[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [pendingDeleteSaleId, setPendingDeleteSaleId] = useState<string | null>(null);
   const [formData, setFormData] = useState<SalePayload>({
     productName: "",
     description: "",
@@ -406,9 +407,13 @@ export default function SaleTab() {
     sales,
   ]);
 
+  const sellableInventoryItems = useMemo(
+    () => inventoryItems.filter((item) => !item.restricted),
+    [inventoryItems],
+  );
   const selectedInventoryItem = useMemo(
-    () => inventoryItems.find((item) => item.name === formData.inventoryItem) ?? null,
-    [inventoryItems, formData.inventoryItem],
+    () => sellableInventoryItems.find((item) => item.name === formData.inventoryItem) ?? null,
+    [sellableInventoryItems, formData.inventoryItem],
   );
   const selectedInventoryCount = selectedInventoryItem?.count ?? 0;
   const playerComboboxData = useMemo(() => {
@@ -557,8 +562,13 @@ export default function SaleTab() {
     );
 
     if (!isMountedRef.current) return;
-    if (response.ok && Array.isArray(response.categories)) {
-      setCategoryOptions(response.categories);
+    if (response.ok) {
+      if (response.inventoryImagePath) {
+        setCommerceImagePath(response.inventoryImagePath);
+      }
+      if (Array.isArray(response.categories)) {
+        setCategoryOptions(response.categories);
+      }
     }
   }, []);
 
@@ -975,14 +985,14 @@ export default function SaleTab() {
                       <SelectValue placeholder="Select inventory item" />
                     </SelectTrigger>
                     <SelectContent className="max-h-48">
-                      {inventoryItems.map((item) => (
+                      {sellableInventoryItems.map((item) => (
                         <SelectItem key={item.name} value={item.name}>
                           {item.label} ({item.count})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {!isLoadingInventory && inventoryItems.length === 0 ? (
+                  {!isLoadingInventory && sellableInventoryItems.length === 0 ? (
                     <p className="text-xs text-[var(--ds-text-muted)]">
                       No inventory items found.
                     </p>
@@ -1264,7 +1274,7 @@ export default function SaleTab() {
               index={index}
               placeholderItemImage={placeholderItemImage}
               onEdit={handleEdit}
-              onDelete={handleDelete}
+              onDelete={setPendingDeleteSaleId}
             />
           ))}
           {hasMoreSales ? (
@@ -1279,6 +1289,21 @@ export default function SaleTab() {
           ) : null}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingDeleteSaleId !== null}
+        title="Remove sale"
+        description="Remove this listing? You can collect your items on the Claims page."
+        confirmLabel="Remove sale"
+        destructive
+        onCancel={() => setPendingDeleteSaleId(null)}
+        onConfirm={() => {
+          if (!pendingDeleteSaleId) return;
+          const saleId = pendingDeleteSaleId;
+          setPendingDeleteSaleId(null);
+          void handleDelete(saleId);
+        }}
+      />
     </>
   );
 }

@@ -9,7 +9,6 @@ local BIDS_TABLE = 'bd_commerce_bids'
 local REPORT_TABLE = 'bd_commerce_reports'
 local BLOCKED_SELLERS_TABLE = 'bd_commerce_blocked_sellers'
 local CLAIMS_TABLE = 'bd_commerce_claims'
-local ESX = nil
 local CACHE = {
   dashboard = {},
   publicSales = {},
@@ -39,6 +38,12 @@ local ADMIN_SALES_CACHE = {
   data = nil,
   time = 0,
 }
+local REPORTS_CACHE_TTL = 3
+local REPORTS_CACHE = {
+  key = '',
+  time = 0,
+  data = nil,
+}
 local ACTIVE_ADMIN_REQUESTS = {}
 local ACTIVE_SALE_CHECKOUT_LOCKS = {}
 local NAME_CACHE_MAX_KEYS = 3000
@@ -53,12 +58,6 @@ local function notifyPlayer(src, notifyType, title, message)
   })
 end
 
-CreateThread(function()
-  if GetResourceState('es_extended') == 'started' then
-    ESX = exports['es_extended']:getSharedObject()
-  end
-end)
-
 AddEventHandler('playerDropped', function()
   REPORT_LAST_SUBMIT_AT[source] = nil
 end)
@@ -66,6 +65,79 @@ end)
 local function sanitizeString(value)
   if type(value) ~= 'string' then return '' end
   return value:gsub('^%s+', ''):gsub('%s+$', '')
+end
+
+local DEFAULT_INVENTORY_IMAGE_PATH = 'ox_inventory/web/images'
+
+local function getConfiguredInventoryImagePath()
+  local path = Config and Config.InventoryImagePath
+  if type(path) ~= 'string' or path == '' then
+    return DEFAULT_INVENTORY_IMAGE_PATH
+  end
+  return path
+end
+
+local RESTRICTED_ITEM_LOOKUP = nil
+
+local function getRestrictedItemLookup()
+  if RESTRICTED_ITEM_LOOKUP then
+    return RESTRICTED_ITEM_LOOKUP
+  end
+
+  RESTRICTED_ITEM_LOOKUP = {}
+  local list = Config and Config.RestrictedItems
+  if type(list) == 'table' then
+    for _, itemName in ipairs(list) do
+      if type(itemName) == 'string' then
+        local normalized = itemName:gsub('^%s+', ''):gsub('%s+$', ''):lower()
+        if normalized ~= '' then
+          RESTRICTED_ITEM_LOOKUP[normalized] = true
+        end
+      end
+    end
+  end
+
+  return RESTRICTED_ITEM_LOOKUP
+end
+
+local function isRestrictedInventoryItem(itemName)
+  if type(itemName) ~= 'string' or itemName == '' then
+    return false
+  end
+  return getRestrictedItemLookup()[itemName:lower()] == true
+end
+
+local function annotateInventoryRestrictions(items)
+  if type(items) ~= 'table' then
+    return items
+  end
+
+  for i = 1, #items do
+    local item = items[i]
+    if type(item) == 'table' then
+      item.restricted = isRestrictedInventoryItem(item.name)
+    end
+  end
+
+  return items
+end
+
+local function getConfiguredInventoryImageUrl(itemName)
+  if type(itemName) ~= 'string' or itemName == '' then return '' end
+
+  local path = getConfiguredInventoryImagePath()
+  local resource = path:match('^([^/]+)') or 'ox_inventory'
+  local subPath = path:match('^[^/]+/(.+)$') or 'web/images'
+  local file = itemName
+  if not file:match('%.%w+$') then
+    file = file .. '.png'
+  end
+
+  if GetResourceState(resource) == 'started' then
+    return ('https://cfx-nui-%s/%s/%s'):format(resource, subPath, file)
+  end
+
+  return ''
 end
 
 local function toInteger(value)
@@ -208,6 +280,23 @@ local function setPlayerSearchCache(query, players)
   setCacheEntry('playerSearch', query, players)
 end
 
+local function invalidateReportsCache()
+  REPORTS_CACHE.key = ''
+  REPORTS_CACHE.time = 0
+  REPORTS_CACHE.data = nil
+end
+
+local function invalidateListingCaches(src)
+  CACHE.publicSales = {}
+  cacheLog('INVALIDATE publicSales')
+  ADMIN_SALES_CACHE.data = nil
+  ADMIN_SALES_CACHE.time = 0
+  invalidateReportsCache()
+  if src then
+    invalidateInventoryCache(src)
+  end
+end
+
 local function invalidateCommerceCaches(ownerIdentifier, src, playerSearchQuery)
   CACHE.publicSales = {}
   cacheLog('INVALIDATE publicSales')
@@ -234,6 +323,7 @@ local function invalidateCommerceCaches(ownerIdentifier, src, playerSearchQuery)
 
   ADMIN_SALES_CACHE.data = nil
   ADMIN_SALES_CACHE.time = 0
+  invalidateReportsCache()
 end
 
 local function getCommerceTaxPercent()
@@ -255,100 +345,23 @@ local function queryTimerEnd(startedAt, label)
 end
 
 local function getOwnerIdentifier(src)
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer and xPlayer.getIdentifier then
-      local identifier = xPlayer.getIdentifier()
-      if type(identifier) == 'string' and identifier ~= '' then
-        return identifier
-      end
-    end
-  end
-
-  local identifiers = GetPlayerIdentifiers(src)
-  for _, identifier in ipairs(identifiers) do
-    if identifier:match('^char%d+:') then
-      return identifier
-    end
-  end
-
-  for _, identifier in ipairs(identifiers) do
-    if identifier:match('^license:') then
-      return identifier
-    end
-  end
-
-  return identifiers[1] or ('src:%s'):format(src)
+  return CommerceFramework.GetOwnerIdentifier(src)
 end
 
 local function getCharacterIdentifierFromSource(src)
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer and xPlayer.getIdentifier then
-      local identifier = xPlayer.getIdentifier()
-      if type(identifier) == 'string' and identifier:match('^char%d+:') then
-        return identifier
-      end
-    end
-  end
-
-  local identifiers = GetPlayerIdentifiers(src)
-  for _, identifier in ipairs(identifiers) do
-    if identifier:match('^char%d+:') then
-      return identifier
-    end
-  end
-
-  return nil
+  return CommerceFramework.GetCharacterIdentifierFromSource(src)
 end
 
 local function getPlayerDisplayName(src)
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer and xPlayer.getName then
-      local name = xPlayer.getName()
-      if type(name) == 'string' and name ~= '' then
-        return name
-      end
-    end
-  end
-
-  return GetPlayerName(src) or ('ID %s'):format(src)
+  return CommerceFramework.GetPlayerDisplayName(src)
 end
 
 local function getPlayerJobKeys(src)
-  if not ESX then return {} end
-
-  local xPlayer = ESX.GetPlayerFromId(src)
-  if not xPlayer or type(xPlayer.job) ~= 'table' then return {} end
-
-  local keys = {}
-  local jobName = sanitizeString(tostring(xPlayer.job.name or '')):lower()
-  local jobLabel = sanitizeString(tostring(xPlayer.job.label or '')):lower()
-
-  if jobName ~= '' then keys[jobName] = true end
-  if jobLabel ~= '' then keys[jobLabel] = true end
-
-  return keys
+  return CommerceFramework.GetPlayerJobKeys(src)
 end
 
 local function isAdminSource(src)
-  if not src or src == 0 then return true end
-  if IsPlayerAceAllowed(src, 'bd_commerce.admin') or IsPlayerAceAllowed(src, 'command') then
-    return true
-  end
-
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer and xPlayer.getGroup then
-      local group = sanitizeString(tostring(xPlayer.getGroup() or '')):lower()
-      if group == 'admin' or group == 'superadmin' then
-        return true
-      end
-    end
-  end
-
-  return false
+  return CommerceFramework.IsAdminSource(src)
 end
 
 local function isSellerBlocked(ownerIdentifier)
@@ -362,33 +375,7 @@ local function isSellerBlocked(ownerIdentifier)
 end
 
 local function getAvailableJobTargets()
-  local jobs = {}
-  local seen = {}
-
-  if ESX and ESX.GetJobs then
-    local esxJobs = ESX.GetJobs() or {}
-    for jobName, jobData in pairs(esxJobs) do
-      local normalizedName = sanitizeString(tostring(jobName or '')):lower()
-      local label = ''
-      if type(jobData) == 'table' then
-        label = sanitizeString(tostring(jobData.label or ''))
-      end
-
-      if normalizedName ~= '' and not seen[normalizedName] then
-        seen[normalizedName] = true
-        jobs[#jobs + 1] = {
-          value = normalizedName,
-          label = label ~= '' and label or normalizedName,
-        }
-      end
-    end
-  end
-
-  table.sort(jobs, function(a, b)
-    return a.label:lower() < b.label:lower()
-  end)
-
-  return jobs
+  return CommerceFramework.GetAvailableJobTargets()
 end
 
 local function findPlayerByCharacterIdentifier(characterIdentifier)
@@ -550,28 +537,19 @@ local function getOnlineCharacterNameMap()
   return onlineMap
 end
 
-local function buildIdentifierNameMapFromRows(rows)
-  local function buildPlaceholders(count)
-    if count <= 0 then return '' end
-    local placeholders = {}
-    for i = 1, count do
-      placeholders[i] = '?'
-    end
-    return table.concat(placeholders, ',')
+local function buildPlaceholders(count)
+  if count <= 0 then return '' end
+  local placeholders = {}
+  for i = 1, count do
+    placeholders[i] = '?'
   end
+  return table.concat(placeholders, ',')
+end
 
-  local identifierSet = {}
+local function buildIdentifierNameMap(identifierSet)
   local unresolvedIdentifiers = {}
   local onlineNames = getOnlineCharacterNameMap()
   local resolvedNames = {}
-
-  for _, row in ipairs(rows) do
-    local ownerIdentifier = tostring(row.owner_identifier or '')
-    local playerTargetIdentifier = tostring(row.player_target or '')
-
-    if ownerIdentifier ~= '' then identifierSet[ownerIdentifier] = true end
-    if playerTargetIdentifier ~= '' then identifierSet[playerTargetIdentifier] = true end
-  end
 
   for identifier in pairs(identifierSet) do
     local onlineName = onlineNames[identifier]
@@ -624,6 +602,21 @@ local function buildIdentifierNameMapFromRows(rows)
 
   pruneCharacterNameCacheIfNeeded()
   return resolvedNames
+end
+
+local function buildIdentifierNameMapFromRows(rows)
+  local identifierSet = {}
+  for _, row in ipairs(rows) do
+    local ownerIdentifier = tostring(row.owner_identifier or '')
+    local playerTargetIdentifier = tostring(row.player_target or '')
+    if ownerIdentifier ~= '' then identifierSet[ownerIdentifier] = true end
+    if playerTargetIdentifier ~= '' then identifierSet[playerTargetIdentifier] = true end
+  end
+  return buildIdentifierNameMap(identifierSet)
+end
+
+local function getReportsCacheKey(statusFilter, reasonFilter, page, pageSize)
+  return ('%s|%s|%d|%d'):format(statusFilter or '', reasonFilter or '', page, pageSize)
 end
 
 local function resolvePersonTargetInput(rawTarget)
@@ -681,37 +674,41 @@ local function getPlayerInventoryItems(src)
     lookup[normalized.name] = normalized
   end
 
-  local function getInventoryImage(itemName)
-    if GetResourceState('ox_inventory') == 'started' then
-      return ('https://cfx-nui-ox_inventory/web/images/%s.png'):format(itemName)
-    end
-    return ''
-  end
-
   if GetResourceState('ox_inventory') == 'started' and exports.ox_inventory and exports.ox_inventory.GetInventoryItems then
     local oxItems = exports.ox_inventory:GetInventoryItems(src) or {}
     for _, item in pairs(oxItems) do
       local count = tonumber(item.count) or 0
       if count > 0 and item.name then
         local itemName = tostring(item.name)
-        local image = getInventoryImage(itemName)
+        local image = getConfiguredInventoryImageUrl(itemName)
         addOrMergeItem(itemName, item.label or item.name, count, image)
       end
     end
     return items, lookup
   end
 
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer and xPlayer.getInventory then
-      for _, item in ipairs(xPlayer.getInventory()) do
-        local count = tonumber(item.count) or 0
-        if count > 0 and item.name then
-          addOrMergeItem(item.name, item.label or item.name, count, getInventoryImage(item.name))
+  local esxInventory = CommerceFramework.GetEsxInventoryItems(src)
+  if esxInventory then
+    for _, item in ipairs(esxInventory) do
+      local count = tonumber(item.count) or 0
+      if count > 0 and item.name then
+        addOrMergeItem(item.name, item.label or item.name, count, getConfiguredInventoryImageUrl(item.name))
+      end
+    end
+    return items, lookup
+  end
+
+  local qbPlayer = CommerceFramework.GetQbPlayer(src)
+  if qbPlayer and qbPlayer.PlayerData and qbPlayer.PlayerData.items then
+    for _, item in pairs(qbPlayer.PlayerData.items) do
+      if item and item.name then
+        local count = tonumber(item.amount or item.count) or 0
+        if count > 0 then
+          addOrMergeItem(item.name, item.label or item.name, count, getConfiguredInventoryImageUrl(item.name))
         end
       end
-      return items, lookup
     end
+    return items, lookup
   end
 
   return items, lookup
@@ -726,16 +723,9 @@ local function removeInventoryItem(src, itemName, amount)
     return success
   end
 
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer then
-      xPlayer.removeInventoryItem(itemName, amount)
-      invalidateInventoryCache(src)
-      return true
-    end
-  end
-
-  return false
+  local success = CommerceFramework.RemoveInventoryItem(src, itemName, amount)
+  if success then invalidateInventoryCache(src) end
+  return success
 end
 
 local function addInventoryItem(src, itemName, amount)
@@ -747,77 +737,21 @@ local function addInventoryItem(src, itemName, amount)
     return success
   end
 
-  if ESX then
-    local xPlayer = ESX.GetPlayerFromId(src)
-    if xPlayer then
-      xPlayer.addInventoryItem(itemName, amount)
-      invalidateInventoryCache(src)
-      return true
-    end
-  end
-
-  return false
+  local success = CommerceFramework.AddInventoryItem(src, itemName, amount)
+  if success then invalidateInventoryCache(src) end
+  return success
 end
 
 local function getAccountBalance(src, accountType)
-  if not ESX then return nil end
-  local xPlayer = ESX.GetPlayerFromId(src)
-  if not xPlayer then return nil end
-
-  if accountType == 'cash' then
-    if xPlayer.getMoney then
-      return tonumber(xPlayer.getMoney()) or 0
-    end
-    return nil
-  end
-
-  if accountType == 'bank' then
-    if xPlayer.getAccount then
-      local bankAccount = xPlayer.getAccount('bank')
-      if type(bankAccount) == 'table' then
-        return tonumber(bankAccount.money) or 0
-      end
-    end
-    return nil
-  end
-
-  return nil
+  return CommerceFramework.GetAccountBalance(src, accountType)
 end
 
 local function removePlayerMoney(src, accountType, amount)
-  if amount <= 0 or not ESX then return false end
-  local xPlayer = ESX.GetPlayerFromId(src)
-  if not xPlayer then return false end
-
-  if accountType == 'cash' and xPlayer.removeMoney then
-    xPlayer.removeMoney(amount)
-    return true
-  end
-
-  if accountType == 'bank' and xPlayer.removeAccountMoney then
-    xPlayer.removeAccountMoney('bank', amount)
-    return true
-  end
-
-  return false
+  return CommerceFramework.RemovePlayerMoney(src, accountType, amount)
 end
 
 local function addPlayerMoney(src, accountType, amount)
-  if amount <= 0 or not ESX then return false end
-  local xPlayer = ESX.GetPlayerFromId(src)
-  if not xPlayer then return false end
-
-  if accountType == 'cash' and xPlayer.addMoney then
-    xPlayer.addMoney(amount)
-    return true
-  end
-
-  if accountType == 'bank' and xPlayer.addAccountMoney then
-    xPlayer.addAccountMoney('bank', amount)
-    return true
-  end
-
-  return false
+  return CommerceFramework.AddPlayerMoney(src, accountType, amount)
 end
 
 local function getSellerWallet(ownerIdentifier)
@@ -1262,6 +1196,9 @@ local function validateSalePayload(payload)
   if productName == '' then return false, 'Product name is required.' end
   if description == '' then return false, 'Description is required.' end
   if inventoryItem == '' then return false, 'Inventory item is required.' end
+  if isRestrictedInventoryItem(inventoryItem) then
+    return false, 'This item cannot be listed on the marketplace.'
+  end
   if not quantity or quantity < 1 then return false, 'Quantity must be at least 1.' end
   if saleType ~= 'Auction' and (not price or price < 0) then return false, 'Price must be 0 or greater.' end
   if discount < 0 or discount > 100 then return false, 'Discount must be between 0 and 100.' end
@@ -1622,6 +1559,8 @@ RegisterNetEvent('bd_commerce:server:getInventoryItems', function(requestId)
   else
     cacheLog(('HIT inventory src=%s'):format(src))
   end
+
+  annotateInventoryRestrictions(items)
 
   TriggerClientEvent(responseEvent, src, requestId, {
     ok = true,
@@ -2429,6 +2368,8 @@ RegisterNetEvent('bd_commerce:server:getCommerceMeta', function(requestId)
     ok = true,
     message = 'Commerce metadata loaded.',
     categories = categories,
+    inventoryImagePath = getConfiguredInventoryImagePath(),
+    isAdmin = isAdminSource(src),
   })
 end)
 
@@ -2622,9 +2563,31 @@ RegisterNetEvent('bd_commerce:server:submitReport', function(requestId, payload)
     description = description:sub(1, 500)
   end
 
+  local reporterId = getOwnerIdentifier(src)
+  if reporterId == '' then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Could not resolve reporter.',
+    })
+    return
+  end
+
   local listingRow = MySQL.single.await(
-    ('SELECT id, owner_identifier FROM `%s` WHERE id = ? LIMIT 1'):format(TABLE_NAME),
-    { dbSaleId }
+    ([[
+      SELECT
+        s.id,
+        s.owner_identifier,
+        (
+          SELECT r.id
+          FROM `%s` r
+          WHERE r.listing_id = s.id AND r.reporter_id = ?
+          LIMIT 1
+        ) AS existing_report_id
+      FROM `%s` s
+      WHERE s.id = ?
+      LIMIT 1
+    ]]):format(REPORT_TABLE, TABLE_NAME),
+    { reporterId, dbSaleId }
   )
   if not listingRow then
     TriggerClientEvent(responseEvent, src, requestId, {
@@ -2634,24 +2597,19 @@ RegisterNetEvent('bd_commerce:server:submitReport', function(requestId, payload)
     return
   end
 
-  local reporterId = getOwnerIdentifier(src)
-  local sellerId = tostring(listingRow.owner_identifier or '')
-  if reporterId == '' or sellerId == '' then
+  if listingRow.existing_report_id then
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = false,
-      message = 'Could not resolve reporter or seller.',
+      message = 'You already reported this listing.',
     })
     return
   end
 
-  local duplicate = MySQL.single.await(
-    ('SELECT id FROM `%s` WHERE listing_id = ? AND reporter_id = ? LIMIT 1'):format(REPORT_TABLE),
-    { dbSaleId, reporterId }
-  )
-  if duplicate then
+  local sellerId = tostring(listingRow.owner_identifier or '')
+  if sellerId == '' then
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = false,
-      message = 'You already reported this listing.',
+      message = 'Could not resolve seller.',
     })
     return
   end
@@ -2668,6 +2626,8 @@ RegisterNetEvent('bd_commerce:server:submitReport', function(requestId, payload)
     })
     return
   end
+
+  invalidateReportsCache()
 
   TriggerClientEvent(responseEvent, src, requestId, {
     ok = true,
@@ -2705,6 +2665,12 @@ RegisterNetEvent('bd_commerce:server:getReports', function(requestId, payload)
   local page = math.max(1, toInteger(payload.page) or 1)
   local pageSize = math.max(1, math.min(100, toInteger(payload.pageSize) or 20))
   local offset = (page - 1) * pageSize
+  local cacheKey = getReportsCacheKey(statusFilter, reasonFilter, page, pageSize)
+  local now = os.time()
+  if REPORTS_CACHE.data and REPORTS_CACHE.key == cacheKey and (now - REPORTS_CACHE.time) < REPORTS_CACHE_TTL then
+    TriggerClientEvent(responseEvent, src, requestId, REPORTS_CACHE.data)
+    return
+  end
 
   local whereParts = {}
   local whereParams = {}
@@ -2750,6 +2716,15 @@ RegisterNetEvent('bd_commerce:server:getReports', function(requestId, payload)
     whereParams
   ) or {}
 
+  local identifierSet = {}
+  for _, row in ipairs(rows) do
+    local sellerId = tostring(row.seller_id or '')
+    local reporterId = tostring(row.reporter_id or '')
+    if sellerId ~= '' then identifierSet[sellerId] = true end
+    if reporterId ~= '' then identifierSet[reporterId] = true end
+  end
+  local nameMap = buildIdentifierNameMap(identifierSet)
+
   local reports = {}
   for _, row in ipairs(rows) do
     local sellerId = tostring(row.seller_id or '')
@@ -2760,9 +2735,9 @@ RegisterNetEvent('bd_commerce:server:getReports', function(requestId, payload)
       listingTitle = tostring(row.product_name or ('Listing #%s'):format(tostring(row.listing_id or '?'))),
       listingPrice = tonumber(row.price) or 0,
       sellerId = sellerId,
-      sellerName = getCharacterDisplayNameByIdentifier(sellerId),
+      sellerName = nameMap[sellerId] or sellerId,
       reporterId = reporterId,
-      reporterName = getCharacterDisplayNameByIdentifier(reporterId),
+      reporterName = nameMap[reporterId] or reporterId,
       reason = tostring(row.reason or ''),
       description = tostring(row.description or ''),
       status = tostring(row.status or 'pending'),
@@ -2770,14 +2745,19 @@ RegisterNetEvent('bd_commerce:server:getReports', function(requestId, payload)
     }
   end
 
-  TriggerClientEvent(responseEvent, src, requestId, {
+  local responsePayload = {
     ok = true,
     message = 'Reports loaded.',
     reports = reports,
     total = total,
     page = page,
     pageSize = pageSize,
-  })
+  }
+  REPORTS_CACHE.key = cacheKey
+  REPORTS_CACHE.time = now
+  REPORTS_CACHE.data = responsePayload
+
+  TriggerClientEvent(responseEvent, src, requestId, responsePayload)
 end)
 
 RegisterNetEvent('bd_commerce:server:moderateReportAction', function(requestId, payload)
@@ -2842,7 +2822,7 @@ RegisterNetEvent('bd_commerce:server:moderateReportAction', function(requestId, 
       ('UPDATE `%s` SET status = ? WHERE listing_id = ? AND status = ?'):format(REPORT_TABLE),
       { 'resolved', listingId, 'pending' }
     )
-    invalidateCommerceCaches(nil, src)
+    invalidateListingCaches(src)
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = true,
       message = 'Listing removed and related reports resolved.',
@@ -2871,6 +2851,7 @@ RegisterNetEvent('bd_commerce:server:moderateReportAction', function(requestId, 
       ('UPDATE `%s` SET status = ? WHERE seller_id = ? AND status = ?'):format(REPORT_TABLE),
       { 'resolved', sellerId, 'pending' }
     )
+    invalidateReportsCache()
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = true,
       message = 'Seller banned and reports resolved.',
@@ -2882,6 +2863,7 @@ RegisterNetEvent('bd_commerce:server:moderateReportAction', function(requestId, 
     ('UPDATE `%s` SET status = ? WHERE id = ?'):format(REPORT_TABLE),
     { 'resolved', reportId }
   )
+  invalidateReportsCache()
   TriggerClientEvent(responseEvent, src, requestId, {
     ok = true,
     message = 'Report marked as resolved.',
@@ -3415,6 +3397,15 @@ RegisterNetEvent('bd_commerce:server:getAdminSales', function(requestId)
     return
   end
 
+  if not isAdminSource(src) then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Admin permission required.',
+      sales = {},
+    })
+    return
+  end
+
   local now = os.time()
   if ADMIN_SALES_CACHE.data and (now - ADMIN_SALES_CACHE.time) < ADMIN_CACHE_TTL then
     TriggerClientEvent(responseEvent, src, requestId, {
@@ -3494,6 +3485,14 @@ RegisterNetEvent('bd_commerce:server:adminUpdateSale', function(requestId, paylo
     TriggerClientEvent(responseEvent, src, requestId, {
       ok = false,
       message = 'Invalid request payload.',
+    })
+    return
+  end
+
+  if not isAdminSource(src) then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Admin permission required.',
     })
     return
   end
@@ -3784,6 +3783,14 @@ RegisterNetEvent('bd_commerce:server:adminDeleteSale', function(requestId, paylo
     TriggerClientEvent(responseEvent, src, requestId or '', {
       ok = false,
       message = 'Invalid request id.',
+    })
+    return
+  end
+
+  if not isAdminSource(src) then
+    TriggerClientEvent(responseEvent, src, requestId, {
+      ok = false,
+      message = 'Admin permission required.',
     })
     return
   end

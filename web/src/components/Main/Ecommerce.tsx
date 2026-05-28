@@ -1,7 +1,9 @@
+import { setCommerceImagePath } from "@/lib/commerceConfig";
 import { cn } from "@/lib/utils";
 import { useVisibility } from "@/providers/VisibilityProvider";
 import { fetchNui } from "@/utils/fetchNui";
 import { isEnvBrowser } from "@/utils/misc";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   LucideIcon,
   LayoutDashboard,
@@ -18,6 +20,7 @@ import {
   Outlet,
   Route,
   Routes,
+  useOutletContext,
 } from "react-router-dom";
 import AdminSale from "@/components/Form/AdminSale";
 import BuyListing from "@/components/Form/BuyListing";
@@ -28,18 +31,31 @@ import Claims from "../Form/Claims";
 import Coupon from "../Form/Coupon";
 import Reports from "../Form/Reports";
 
-type NavItem =
-  | { to: string; icon: LucideIcon }
-  | { to: null; icon: LucideIcon };
+type CommerceMetaResponse = {
+  ok: boolean;
+  inventoryImagePath?: string;
+  isAdmin?: boolean;
+};
+
+type EcommerceOutletContext = {
+  isAdmin: boolean;
+  metaLoaded: boolean;
+};
+
+type NavItem = {
+  to: string;
+  icon: LucideIcon;
+  adminOnly?: boolean;
+};
 
 const SIDEBAR_ITEMS: NavItem[] = [
   { to: "/dashboard", icon: LayoutDashboard },
   { to: "/buy-listing", icon: ShoppingCart },
-  { to: "/claims", icon: PackageCheck },
   { to: "/sale-tab", icon: Handshake },
   { to: "/coupen-code", icon: TicketPercent },
-  { to: "/admin-sale", icon: ShieldCheck },
-  { to: "/reports", icon: ShieldAlert },
+  { to: "/claims", icon: PackageCheck },
+  { to: "/reports", icon: ShieldAlert, adminOnly: true },
+  { to: "/admin-sale", icon: ShieldCheck, adminOnly: true },
 ];
 
 function navItemClassName(isActive: boolean) {
@@ -58,8 +74,49 @@ function navIconWrapClassName(isActive: boolean) {
   );
 }
 
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAdmin, metaLoaded } = useOutletContext<EcommerceOutletContext>();
+
+  if (!metaLoaded) {
+    return null;
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function EcommerceShell() {
   const { setVisible } = useVisibility();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [metaLoaded, setMetaLoaded] = useState(false);
+
+  const visibleSidebarItems = useMemo(
+    () => SIDEBAR_ITEMS.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
+  );
+
+  useEffect(() => {
+    void fetchNui<CommerceMetaResponse>(
+      "getCommerceMeta",
+      {},
+      {
+        ok: true,
+        inventoryImagePath: "ox_inventory/web/images",
+        isAdmin: isEnvBrowser(),
+      },
+    ).then((response) => {
+      if (response.ok) {
+        if (response.inventoryImagePath) {
+          setCommerceImagePath(response.inventoryImagePath);
+        }
+        setIsAdmin(Boolean(response.isAdmin));
+      }
+      setMetaLoaded(true);
+    });
+  }, []);
 
   const handleClose = () => {
     if (!isEnvBrowser()) void fetchNui("hideFrame");
@@ -80,26 +137,8 @@ function EcommerceShell() {
           aria-label="Primary"
         >
           <div className="mt-1 flex flex-col gap-1">
-            {SIDEBAR_ITEMS.map((item, index) => {
+            {visibleSidebarItems.map((item) => {
               const Icon = item.icon;
-              if (item.to === null) {
-                return (
-                  <div
-                    key={`spacer-${index}`}
-                    className="flex w-full justify-center py-1.5 opacity-35"
-                    aria-hidden
-                  >
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-lg",
-                        "text-[var(--ds-text-disabled)]",
-                      )}
-                    >
-                      <Icon className="h-5 w-5" strokeWidth={1.75} />
-                    </div>
-                  </div>
-                );
-              }
               return (
                 <NavLink
                   key={item.to}
@@ -137,7 +176,7 @@ function EcommerceShell() {
               "bg-[var(--ds-bg-main)] px-5 py-4",
             )}
           >
-            <Outlet />
+            <Outlet context={{ isAdmin, metaLoaded } satisfies EcommerceOutletContext} />
           </div>
         </div>
       </div>
@@ -153,10 +192,24 @@ export default function Ecommerce() {
         <Route path="dashboard" element={<DashBoard />} />
         <Route path="buy-listing" element={<BuyListing />} />
         <Route path="claims" element={<Claims />} />
-        <Route path="admin-sale" element={<AdminSale />} />
+        <Route
+          path="admin-sale"
+          element={
+            <RequireAdmin>
+              <AdminSale />
+            </RequireAdmin>
+          }
+        />
         <Route path="sale-tab" element={<SaleTab />} />
         <Route path="coupen-code" element={<Coupon />} />
-        <Route path="reports" element={<Reports />} />
+        <Route
+          path="reports"
+          element={
+            <RequireAdmin>
+              <Reports />
+            </RequireAdmin>
+          }
+        />
       </Route>
     </Routes>
   );

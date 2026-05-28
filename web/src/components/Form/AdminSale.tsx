@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -85,6 +86,7 @@ export default function AdminSale() {
   const [statusMessage, setStatusMessage] = useState("");
   const [editing, setEditing] = useState<SaleItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingDeleteSaleId, setPendingDeleteSaleId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     productName: "",
     description: "",
@@ -440,7 +442,7 @@ export default function AdminSale() {
                         size="sm"
                         variant="ghost"
                         className="h-8 w-8 rounded-md px-0 text-[var(--ds-status-error)] hover:bg-[var(--ds-status-error-soft)] hover:text-[var(--ds-status-error)]"
-                        onClick={() => handleDelete(sale.id)}
+                        onClick={() => setPendingDeleteSaleId(sale.id)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -621,6 +623,21 @@ export default function AdminSale() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteSaleId !== null}
+        title="Delete listing"
+        description="Delete this listing? The seller may receive a return claim on the Claims page."
+        confirmLabel="Delete listing"
+        destructive
+        onCancel={() => setPendingDeleteSaleId(null)}
+        onConfirm={() => {
+          if (!pendingDeleteSaleId) return;
+          const saleId = pendingDeleteSaleId;
+          setPendingDeleteSaleId(null);
+          void handleDelete(saleId);
+        }}
+      />
     </section>
   );
 }

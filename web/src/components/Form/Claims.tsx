@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { claimsMockData } from "@/mocks/claimsMockData";
 import { fetchNui } from "@/utils/fetchNui";
+import { ITEM_IMAGE_PLACEHOLDER } from "@/lib/commerceConfig";
 import { getImageUrl } from "@/utils/misc";
 import { PackageCheck, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -168,7 +169,11 @@ export default function Claims() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <img
-                        src={getImageUrl(`${claim.inventoryItem}.png`, undefined, `${claim.inventoryItem}.png`)}
+                        src={getImageUrl(
+                          `${claim.inventoryItem}.png`,
+                          undefined,
+                          ITEM_IMAGE_PLACEHOLDER,
+                        )}
                         alt=""
                         className="h-10 w-10 rounded-md border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-main)] object-contain p-1"
                       />

@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { buyListingMockSales } from "@/mocks/buyListingMockData";
 import { fetchNui } from "@/utils/fetchNui";
+import { ITEM_IMAGE_PLACEHOLDER, setCommerceImagePath } from "@/lib/commerceConfig";
 import { getImageUrl } from "@/utils/misc";
 import { AlertTriangle, Search, ShoppingCart, Star } from "lucide-react";
 import type { HTMLAttributes } from "react";
@@ -90,6 +91,7 @@ type CommerceMetaResponse = {
   ok: boolean;
   message?: string;
   categories: Array<{ id: string; label: string }>;
+  inventoryImagePath?: string;
 };
 
 type SubmitRatingResponse = {
@@ -223,15 +225,11 @@ const ProductCard = memo(function ProductCard({
     <div className="group flex h-[470px] flex-col rounded-xl border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-elevated)]/55 p-3">
       <div className="relative mb-3 flex h-44 items-center justify-center rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-card)]/70 p-2">
         <img
-          src={getImageUrl(
-            item.image,
-            "ox_inventory/web/images",
-            "https://placehold.co/80x80/101010/ffffff?text=S",
-          )}
+          src={getImageUrl(item.image, undefined, ITEM_IMAGE_PLACEHOLDER)}
           alt={item.name}
           className="h-full w-full rounded-md object-contain"
           onError={(event) => {
-            event.currentTarget.src = "https://placehold.co/80x80/101010/ffffff?text=S";
+            event.currentTarget.src = ITEM_IMAGE_PLACEHOLDER;
           }}
         />
       </div>
@@ -464,8 +462,13 @@ export default function BuyListing() {
         categories: [],
       }),
     );
-    if (response.ok && Array.isArray(response.categories)) {
-      setCategoryOptions(response.categories);
+    if (response.ok) {
+      if (response.inventoryImagePath) {
+        setCommerceImagePath(response.inventoryImagePath);
+      }
+      if (Array.isArray(response.categories)) {
+        setCategoryOptions(response.categories);
+      }
     }
   }, []);
 

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -53,6 +54,31 @@ type ModerateResponse = {
 
 const PAGE_SIZE = 20;
 
+type ModerationAction = "resolve" | "remove_listing" | "ban_seller";
+
+type PendingModeration = {
+  reportId: number;
+  action: "remove_listing" | "ban_seller";
+};
+
+const MODERATION_CONFIRM: Record<
+  PendingModeration["action"],
+  { title: string; description: string; confirmLabel: string }
+> = {
+  remove_listing: {
+    title: "Remove listing",
+    description:
+      "Remove this listing from the marketplace? The seller can collect their items on the Claims page.",
+    confirmLabel: "Remove listing",
+  },
+  ban_seller: {
+    title: "Ban seller",
+    description:
+      "Ban this seller from the marketplace? They will not be able to create new listings.",
+    confirmLabel: "Ban seller",
+  },
+};
+
 export default function Reports() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | ReportStatus>("pending");
@@ -62,6 +88,7 @@ export default function Reports() {
   const [total, setTotal] = useState(0);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingModeration, setPendingModeration] = useState<PendingModeration | null>(null);
 
   const loadReports = useCallback(async () => {
     setIsLoading(true);
@@ -127,8 +154,7 @@ export default function Reports() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const runAction = useCallback(
-    async (reportId: number, action: "resolve" | "remove_listing" | "ban_seller") => {
-      if (action !== "resolve" && !window.confirm("Are you sure?")) return;
+    async (reportId: number, action: ModerationAction) => {
       const response = await fetchNui<ModerateResponse>(
         "moderateReportAction",
         { reportId, action },
@@ -222,10 +248,22 @@ export default function Reports() {
                     <Button size="sm" variant="secondary" onClick={() => void runAction(report.id, "resolve")}>
                       Resolve
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => void runAction(report.id, "remove_listing")}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setPendingModeration({ reportId: report.id, action: "remove_listing" })
+                      }
+                    >
                       Remove Listing
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={() => void runAction(report.id, "ban_seller")}>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        setPendingModeration({ reportId: report.id, action: "ban_seller" })
+                      }
+                    >
                       Ban Seller
                     </Button>
                   </div>
@@ -255,6 +293,27 @@ export default function Reports() {
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingModeration !== null}
+        title={
+          pendingModeration ? MODERATION_CONFIRM[pendingModeration.action].title : undefined
+        }
+        description={
+          pendingModeration ? MODERATION_CONFIRM[pendingModeration.action].description : ""
+        }
+        confirmLabel={
+          pendingModeration ? MODERATION_CONFIRM[pendingModeration.action].confirmLabel : undefined
+        }
+        destructive
+        onCancel={() => setPendingModeration(null)}
+        onConfirm={() => {
+          if (!pendingModeration) return;
+          const { reportId, action } = pendingModeration;
+          setPendingModeration(null);
+          void runAction(reportId, action);
+        }}
+      />
     </section>
   );
 }
