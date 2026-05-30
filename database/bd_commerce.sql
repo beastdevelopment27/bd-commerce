@@ -1,13 +1,4 @@
-DROP TABLE IF EXISTS `bd_commerce_claims`;
-DROP TABLE IF EXISTS `bd_commerce_blocked_sellers`;
-DROP TABLE IF EXISTS `bd_commerce_reports`;
-DROP TABLE IF EXISTS `bd_commerce_bids`;
-DROP TABLE IF EXISTS `bd_commerce_seller_rating_stats`;
-DROP TABLE IF EXISTS `bd_commerce_seller_ratings`;
-DROP TABLE IF EXISTS `bd_commerce_purchases`;
-DROP TABLE IF EXISTS `bd_commerce_sales`;
-
-CREATE TABLE `bd_commerce_sales` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_sales` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `owner_identifier` VARCHAR(80) NOT NULL,
   `product_name` VARCHAR(100) NOT NULL,
@@ -36,7 +27,7 @@ CREATE TABLE `bd_commerce_sales` (
   KEY `idx_auction_end_time` (`auction_end_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_purchases` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_purchases` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `buyer_identifier` VARCHAR(80) NOT NULL,
   `seller_identifier` VARCHAR(80) NOT NULL,
@@ -51,7 +42,7 @@ CREATE TABLE `bd_commerce_purchases` (
   KEY `idx_purchases_sale` (`sale_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_seller_ratings` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_seller_ratings` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `purchase_id` INT NOT NULL,
   `buyer_identifier` VARCHAR(80) NOT NULL,
@@ -63,7 +54,7 @@ CREATE TABLE `bd_commerce_seller_ratings` (
   KEY `idx_ratings_seller` (`seller_identifier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_seller_rating_stats` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_seller_rating_stats` (
   `seller_identifier` VARCHAR(80) NOT NULL,
   `total_stars` BIGINT NOT NULL DEFAULT 0,
   `rating_count` INT NOT NULL DEFAULT 0,
@@ -71,7 +62,7 @@ CREATE TABLE `bd_commerce_seller_rating_stats` (
   PRIMARY KEY (`seller_identifier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_bids` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_bids` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `sale_id` INT NOT NULL,
   `bidder_identifier` VARCHAR(80) NOT NULL,
@@ -83,7 +74,7 @@ CREATE TABLE `bd_commerce_bids` (
   KEY `idx_bids_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_seller_wallet` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_seller_wallet` (
   `owner_identifier` VARCHAR(80) NOT NULL,
   `balance` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `total_sales` INT NOT NULL DEFAULT 0,
@@ -92,7 +83,7 @@ CREATE TABLE `bd_commerce_seller_wallet` (
   PRIMARY KEY (`owner_identifier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_coupons` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_coupons` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `code` VARCHAR(32) NOT NULL,
   `discount_type` VARCHAR(16) NOT NULL,
@@ -109,7 +100,7 @@ CREATE TABLE `bd_commerce_coupons` (
   KEY `idx_coupon_expires_at` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_reports` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_reports` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `listing_id` INT NOT NULL,
   `reporter_id` VARCHAR(80) NOT NULL,
@@ -126,7 +117,7 @@ CREATE TABLE `bd_commerce_reports` (
   KEY `idx_reports_seller` (`seller_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_claims` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_claims` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `recipient_identifier` VARCHAR(80) NOT NULL,
   `claim_type` VARCHAR(32) NOT NULL,
@@ -142,7 +133,7 @@ CREATE TABLE `bd_commerce_claims` (
   KEY `idx_claims_sale` (`sale_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `bd_commerce_blocked_sellers` (
+CREATE TABLE IF NOT EXISTS `bd_commerce_blocked_sellers` (
   `seller_id` VARCHAR(80) NOT NULL,
   `reason` VARCHAR(120) NOT NULL DEFAULT 'Banned by moderation',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
