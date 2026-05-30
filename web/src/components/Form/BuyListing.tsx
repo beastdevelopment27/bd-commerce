@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { buyListingMockSales } from "@/mocks/buyListingMockData";
 import { fetchNui } from "@/utils/fetchNui";
-import { ITEM_IMAGE_PLACEHOLDER, setCommerceImagePath } from "@/lib/commerceConfig";
+import { applyCommerceMeta, ITEM_IMAGE_PLACEHOLDER } from "@/lib/commerceConfig";
 import { getImageUrl } from "@/utils/misc";
 import { AlertTriangle, Search, ShoppingCart, Star } from "lucide-react";
 import type { HTMLAttributes } from "react";
@@ -92,6 +92,8 @@ type CommerceMetaResponse = {
   message?: string;
   categories: Array<{ id: string; label: string }>;
   inventoryImagePath?: string;
+  panelTitle?: string;
+  panelSubtitle?: string;
 };
 
 type SubmitRatingResponse = {
@@ -463,9 +465,7 @@ export default function BuyListing() {
       }),
     );
     if (response.ok) {
-      if (response.inventoryImagePath) {
-        setCommerceImagePath(response.inventoryImagePath);
-      }
+      applyCommerceMeta(response);
       if (Array.isArray(response.categories)) {
         setCategoryOptions(response.categories);
       }

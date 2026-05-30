@@ -1,3 +1,7 @@
+import {
+  getCommercePanelSubtitle,
+  getCommercePanelTitle,
+} from "@/lib/commerceConfig";
 import { cn } from "@/lib/utils";
 import { FileText, X } from "lucide-react";
 
@@ -33,10 +37,10 @@ export function EcommercePanelHeader({ onClose }: EcommercePanelHeaderProps) {
               "text-lg font-bold leading-tight tracking-tight text-[var(--ds-text-primary)]",
             )}
           >
-            RTO
+            {getCommercePanelTitle()}
           </h1>
           <p className="text-sm font-normal leading-tight text-[var(--ds-text-secondary)]">
-            RTO System
+            {getCommercePanelSubtitle()}
           </p>
         </div>
       </div>

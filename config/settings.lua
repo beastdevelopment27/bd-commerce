@@ -1,10 +1,19 @@
 Config = Config or {}
 
--- NUI path for inventory item images (used as nui://{path}/{filename} in the marketplace UI).
--- First segment is the resource name (e.g. ox_inventory). Change if you use qb-inventory, qs-inventory, etc.
-Config.InventoryImagePath = 'ox_inventory/web/images'
+--- Marketplace panel header (top bar title + subtitle in NUI).
+Config.PanelTitle = 'ABay'
+Config.PanelSubtitle = 'System to Sell and Buy items'
+
+-- Inventory image base path: {resource}/{folder inside that resource}.
+-- The first segment MUST match the resource folder name exactly (as in server.cfg / `ensure`).
+-- No trailing slash. Examples:
+--   ox_inventory:  'ox_inventory/web/images'
+--   qb-inventory:  'qb-inventory/html/images'
+--   ps-inventory:  'ps-inventory/html/images'
+Config.InventoryImagePath = 'qb-inventory/html/images'
 
 -- Percentage fee deducted from each sale payout before seller credit.
+-- The fee amount is deposited to the job society configured in config/society.lua.
 Config.CommerceTaxPercent = 5.0
 
 --- ESX/QBCore groups that can access Admin Sale and Reports (case-insensitive).

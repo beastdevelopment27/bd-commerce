@@ -14,7 +14,11 @@ export const getImageUrl = (
 ): string => {
     if (!image) return fallback;
 
-    if (image.startsWith("http://") || image.startsWith("https://")) {
+    if (
+        image.startsWith("http://") ||
+        image.startsWith("https://") ||
+        image.startsWith("nui://")
+    ) {
         return image;
     }
 
@@ -22,6 +26,7 @@ export const getImageUrl = (
         return fallback;
     }
 
-    const path = inventoryPath ?? getCommerceImagePath();
-    return `nui://${path}/${image}` || fallback;
+    const path = (inventoryPath ?? getCommerceImagePath()).replace(/\/+$/, "");
+    const file = image.replace(/^\/+/, "");
+    return `nui://${path}/${file}` || fallback;
 };

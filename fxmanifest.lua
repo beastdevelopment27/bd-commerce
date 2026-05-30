@@ -15,7 +15,6 @@ dependency 'oxmysql'
 
 -- NUI page (must match Vite outDir: "build"). Run: cd web && npm run build
 ui_page 'web/build/index.html'
--- ui_page 'http://localhost:5173/'
 
 client_script "client/**/*"
 server_script "@oxmysql/lib/MySQL.lua"

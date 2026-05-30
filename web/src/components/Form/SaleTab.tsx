@@ -33,7 +33,7 @@ import { Pencil, Search, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import { setCommerceImagePath } from "@/lib/commerceConfig";
+import { applyCommerceMeta } from "@/lib/commerceConfig";
 import { getImageUrl } from "@/utils/misc";
 import { saleTabMockSales } from "@/mocks/saleTabMockData";
 
@@ -141,6 +141,8 @@ type CommerceMetaResponse = {
   message: string;
   categories: Array<{ id: string; label: string }>;
   inventoryImagePath?: string;
+  panelTitle?: string;
+  panelSubtitle?: string;
 };
 
 type SaleCardProps = {
@@ -563,9 +565,7 @@ export default function SaleTab() {
 
     if (!isMountedRef.current) return;
     if (response.ok) {
-      if (response.inventoryImagePath) {
-        setCommerceImagePath(response.inventoryImagePath);
-      }
+      applyCommerceMeta(response);
       if (Array.isArray(response.categories)) {
         setCategoryOptions(response.categories);
       }

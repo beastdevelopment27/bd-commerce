@@ -1,4 +1,4 @@
-import { setCommerceImagePath } from "@/lib/commerceConfig";
+import { applyCommerceMeta } from "@/lib/commerceConfig";
 import { cn } from "@/lib/utils";
 import { useVisibility } from "@/providers/VisibilityProvider";
 import { fetchNui } from "@/utils/fetchNui";
@@ -34,6 +34,8 @@ import Reports from "../Form/Reports";
 type CommerceMetaResponse = {
   ok: boolean;
   inventoryImagePath?: string;
+  panelTitle?: string;
+  panelSubtitle?: string;
   isAdmin?: boolean;
 };
 
@@ -105,13 +107,13 @@ function EcommerceShell() {
       {
         ok: true,
         inventoryImagePath: "ox_inventory/web/images",
+        panelTitle: "ABay",
+        panelSubtitle: "System to Sell and Buy items",
         isAdmin: isEnvBrowser(),
       },
     ).then((response) => {
       if (response.ok) {
-        if (response.inventoryImagePath) {
-          setCommerceImagePath(response.inventoryImagePath);
-        }
+        applyCommerceMeta(response);
         setIsAdmin(Boolean(response.isAdmin));
       }
       setMetaLoaded(true);

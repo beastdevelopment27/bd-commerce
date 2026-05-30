@@ -69,12 +69,42 @@ end
 
 local DEFAULT_INVENTORY_IMAGE_PATH = 'ox_inventory/web/images'
 
+local function normalizeInventoryImagePath(path)
+  if type(path) ~= 'string' then
+    return DEFAULT_INVENTORY_IMAGE_PATH
+  end
+  path = path:gsub('^%s+', ''):gsub('%s+$', ''):gsub('/+$', '')
+  if path == '' then
+    return DEFAULT_INVENTORY_IMAGE_PATH
+  end
+  return path
+end
+
 local function getConfiguredInventoryImagePath()
   local path = Config and Config.InventoryImagePath
   if type(path) ~= 'string' or path == '' then
     return DEFAULT_INVENTORY_IMAGE_PATH
   end
-  return path
+  return normalizeInventoryImagePath(path)
+end
+
+local DEFAULT_PANEL_TITLE = 'ABay'
+local DEFAULT_PANEL_SUBTITLE = 'System to Sell and Buy items'
+
+local function getConfiguredPanelTitle()
+  local title = Config and Config.PanelTitle
+  if type(title) ~= 'string' or sanitizeString(title) == '' then
+    return DEFAULT_PANEL_TITLE
+  end
+  return sanitizeString(title)
+end
+
+local function getConfiguredPanelSubtitle()
+  local subtitle = Config and Config.PanelSubtitle
+  if type(subtitle) ~= 'string' or sanitizeString(subtitle) == '' then
+    return DEFAULT_PANEL_SUBTITLE
+  end
+  return sanitizeString(subtitle)
 end
 
 local RESTRICTED_ITEM_LOOKUP = nil
@@ -128,16 +158,12 @@ local function getConfiguredInventoryImageUrl(itemName)
   local path = getConfiguredInventoryImagePath()
   local resource = path:match('^([^/]+)') or 'ox_inventory'
   local subPath = path:match('^[^/]+/(.+)$') or 'web/images'
-  local file = itemName
+  local file = itemName:match('([^/]+)$') or itemName
   if not file:match('%.%w+$') then
     file = file .. '.png'
   end
 
-  if GetResourceState(resource) == 'started' then
-    return ('https://cfx-nui-%s/%s/%s'):format(resource, subPath, file)
-  end
-
-  return ''
+  return ('https://cfx-nui-%s/%s/%s'):format(resource, subPath, file)
 end
 
 local function toInteger(value)
@@ -427,53 +453,10 @@ local function searchOnlinePlayers(query)
 end
 
 local function searchCharacterProfiles(query)
-  local needle = sanitizeString(query)
-  local likeQuery = ('%%%s%%'):format(needle)
-  local rows = {}
-
-  if needle == '' then
-    rows = MySQL.query.await([[
-      SELECT identifier, firstname, lastname
-      FROM users
-      WHERE identifier LIKE "char%:%"
-      ORDER BY firstname ASC, lastname ASC
-      LIMIT 200
-    ]]) or {}
-  else
-    rows = MySQL.query.await([[
-      SELECT identifier, firstname, lastname
-      FROM users
-      WHERE identifier LIKE "char%:%"
-        AND (
-          identifier LIKE ?
-          OR firstname LIKE ?
-          OR lastname LIKE ?
-          OR CONCAT(COALESCE(firstname, ''), ' ', COALESCE(lastname, '')) LIKE ?
-        )
-      ORDER BY firstname ASC, lastname ASC
-      LIMIT 200
-    ]], { likeQuery, likeQuery, likeQuery, likeQuery }) or {}
+  if CommerceCharacterProfiles and CommerceCharacterProfiles.Search then
+    return CommerceCharacterProfiles.Search(query)
   end
-
-  local results = {}
-  for _, row in ipairs(rows) do
-    local identifier = tostring(row.identifier or '')
-    if identifier ~= '' then
-      local first = sanitizeString(row.firstname)
-      local last = sanitizeString(row.lastname)
-      local fullName = sanitizeString(('%s %s'):format(first, last))
-      if fullName == '' then
-        fullName = identifier
-      end
-
-      results[#results + 1] = {
-        identifier = identifier,
-        name = fullName,
-      }
-    end
-  end
-
-  return results
+  return {}
 end
 
 local function getCharacterDisplayNameByIdentifier(identifier)
@@ -490,18 +473,12 @@ local function getCharacterDisplayNameByIdentifier(identifier)
     return cached
   end
 
-  local queryStart = queryTimerStart()
-  local row = MySQL.single.await(
-    'SELECT firstname, lastname FROM users WHERE identifier = ? LIMIT 1',
-    { normalized }
-  )
-  queryTimerEnd(queryStart, 'resolveCharacterDisplayName')
+  if CommerceCharacterProfiles and CommerceCharacterProfiles.IsEnabled and CommerceCharacterProfiles.IsEnabled() then
+    local queryStart = queryTimerStart()
+    local fullName = CommerceCharacterProfiles.QuerySingle(normalized)
+    queryTimerEnd(queryStart, 'resolveCharacterDisplayName')
 
-  if row then
-    local first = sanitizeString(row.firstname)
-    local last = sanitizeString(row.lastname)
-    local fullName = sanitizeString(('%s %s'):format(first, last))
-    if fullName ~= '' then
+    if type(fullName) == 'string' and fullName ~= '' and fullName ~= normalized then
       CHARACTER_NAME_CACHE[normalized] = fullName
       return fullName
     end
@@ -566,29 +543,15 @@ local function buildIdentifierNameMap(identifierSet)
     end
   end
 
-  if #unresolvedIdentifiers > 0 then
-    local placeholders = buildPlaceholders(#unresolvedIdentifiers)
-    if placeholders ~= '' then
-      local queryStart = queryTimerStart()
-      local profileRows = MySQL.query.await(
-        ('SELECT identifier, firstname, lastname FROM users WHERE identifier IN (%s)'):format(placeholders),
-        unresolvedIdentifiers
-      ) or {}
-      queryTimerEnd(queryStart, 'getAdminSalesNameBatch')
+  if #unresolvedIdentifiers > 0 and CommerceCharacterProfiles and CommerceCharacterProfiles.QueryByIdentifiers then
+    local queryStart = queryTimerStart()
+    local profileNames = CommerceCharacterProfiles.QueryByIdentifiers(unresolvedIdentifiers)
+    queryTimerEnd(queryStart, 'getAdminSalesNameBatch')
 
-      for _, profile in ipairs(profileRows) do
-        local identifier = tostring(profile.identifier or '')
-        if identifier ~= '' then
-          local fullName = sanitizeString(('%s %s'):format(
-            sanitizeString(profile.firstname),
-            sanitizeString(profile.lastname)
-          ))
-          if fullName == '' then
-            fullName = identifier
-          end
-          resolvedNames[identifier] = fullName
-          CHARACTER_NAME_CACHE[identifier] = fullName
-        end
+    for identifier, fullName in pairs(profileNames) do
+      if fullName and fullName ~= '' then
+        resolvedNames[identifier] = fullName
+        CHARACTER_NAME_CACHE[identifier] = fullName
       end
     end
   end
@@ -1058,10 +1021,11 @@ end
 local function rowToSale(row, sellerStatsMap)
   sellerStatsMap = type(sellerStatsMap) == 'table' and sellerStatsMap or {}
   local image = tostring(row.image or '')
-  if GetResourceState('ox_inventory') == 'started' then
-    if image == '' and tostring(row.inventory_item or '') ~= '' then
-      image = ('%s.png'):format(tostring(row.inventory_item))
-    end
+  if image == '' and tostring(row.inventory_item or '') ~= '' then
+    image = getConfiguredInventoryImageUrl(tostring(row.inventory_item))
+  elseif image ~= '' and not image:find('://', 1, true) then
+    local itemKey = image:match('^([^/]+)%.%w+$') or image
+    image = getConfiguredInventoryImageUrl(itemKey)
   end
 
   local ownerId = tostring(row.owner_identifier or '')
@@ -2288,6 +2252,13 @@ RegisterNetEvent('bd_commerce:server:checkoutCart', function(requestId, payload)
     creditSellerWallet(sellerIdentifier, credit.gross, credit.net)
   end
 
+  if CommerceSociety and CommerceSociety.IsEnabled and CommerceSociety.IsEnabled() then
+    local taxToSociety = CommerceSociety.SumTaxFromCredits(sellerCredits)
+    if taxToSociety > 0 then
+      CommerceSociety.DepositTax(taxToSociety)
+    end
+  end
+
   if appliedCoupon and appliedCoupon.code and appliedCoupon.createdBy and appliedCoupon.createdBy ~= '' then
     local couponRows = MySQL.update.await(
       ([[
@@ -2369,6 +2340,8 @@ RegisterNetEvent('bd_commerce:server:getCommerceMeta', function(requestId)
     message = 'Commerce metadata loaded.',
     categories = categories,
     inventoryImagePath = getConfiguredInventoryImagePath(),
+    panelTitle = getConfiguredPanelTitle(),
+    panelSubtitle = getConfiguredPanelSubtitle(),
     isAdmin = isAdminSource(src),
   })
 end)
@@ -4201,8 +4174,13 @@ CreateThread(function()
           if hasWinner then
             local sellerIdentifier = tostring(row.owner_identifier or '')
             local taxPercent = getCommerceTaxPercent()
-            local netAmount = roundCurrency(highestBid * ((100 - taxPercent) / 100))
+            local grossAmount = roundCurrency(highestBid)
+            local netAmount = roundCurrency(grossAmount * ((100 - taxPercent) / 100))
+            local taxAmount = roundCurrency(grossAmount - netAmount)
             addSellerWalletBalance(sellerIdentifier, netAmount)
+            if taxAmount > 0 and CommerceSociety and CommerceSociety.DepositTax then
+              CommerceSociety.DepositTax(taxAmount)
+            end
             MySQL.insert.await(
               ('INSERT INTO `%s` (buyer_identifier, seller_identifier, sale_id, product_name, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?)'):format(PURCHASE_TABLE),
               { highestBidder, sellerIdentifier, saleId, tostring(row.product_name or ''), tonumber(row.quantity) or 1, highestBid }
