@@ -340,7 +340,7 @@ export default function SaleTab() {
   const placeholderItemImage = "https://placehold.co/80x80/101010/ffffff?text=S";
   const isMountedRef = useRef(true);
   const searchRequestIdRef = useRef(0);
-  const hasLoadedDialogDataRef = useRef(false);
+  const inventoryRequestIdRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -464,11 +464,26 @@ export default function SaleTab() {
     });
   }, [selectedInventoryCount]);
 
-  const loadInventoryItems = useCallback(async () => {
+  const applyLocalInventoryDeduction = useCallback((itemName: string, quantity: number) => {
+    if (!itemName || quantity <= 0) return;
+    setInventoryItems((prev) =>
+      prev
+        .map((item) =>
+          item.name === itemName
+            ? { ...item, count: Math.max(0, item.count - quantity) }
+            : item,
+        )
+        .filter((item) => item.count > 0),
+    );
+  }, []);
+
+  const loadInventoryItems = useCallback(async (options?: { force?: boolean }) => {
+    const requestId = inventoryRequestIdRef.current + 1;
+    inventoryRequestIdRef.current = requestId;
     setIsLoadingInventory(true);
     const response = await fetchNui<InventoryItemsResponse>(
       "getInventoryItems",
-      {},
+      options?.force ? { forceRefresh: true } : {},
       {
         ok: true,
         message: "Inventory loaded (browser mock).",
@@ -500,7 +515,7 @@ export default function SaleTab() {
         items: [],
       }),
     );
-    if (!isMountedRef.current) return;
+    if (!isMountedRef.current || inventoryRequestIdRef.current !== requestId) return;
     setIsLoadingInventory(false);
 
     if (!response.ok) {
@@ -606,12 +621,9 @@ export default function SaleTab() {
   useEffect(() => {
     if (!open) return;
     setSubmitError("");
-    if (!hasLoadedDialogDataRef.current) {
-      hasLoadedDialogDataRef.current = true;
-      loadInventoryItems();
-      loadJobTargets();
-      void loadCommerceMeta();
-    }
+    void loadInventoryItems({ force: true });
+    void loadJobTargets();
+    void loadCommerceMeta();
   }, [open, loadCommerceMeta, loadInventoryItems, loadJobTargets]);
 
   useEffect(() => {
@@ -794,16 +806,20 @@ export default function SaleTab() {
     if (response.sale) {
       const createdSale = response.sale;
       setSales((prev) => [createdSale, ...prev]);
+      const soldItem = createdSale.inventoryItem || formData.inventoryItem;
+      const soldQty = Number(createdSale.quantity) || Number(formData.quantity) || 0;
+      applyLocalInventoryDeduction(soldItem, soldQty);
     } else {
       await loadMySales();
     }
-    await loadInventoryItems();
+    await loadInventoryItems({ force: true });
     setOpen(false);
     setEditingSaleId(null);
     setPlayerSearchQuery("");
     setPlayerSearchResults([]);
     resetForm();
   }, [
+    applyLocalInventoryDeduction,
     editingSaleId,
     formData,
     isSubmitting,

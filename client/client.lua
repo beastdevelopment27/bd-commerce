@@ -135,8 +135,8 @@ RegisterNUICallback('createSale', function(data, cb)
   sendServerRequest(cb, 'bd_commerce:server:createSale', data, 'Server timed out while creating sale.')
 end)
 
-RegisterNUICallback('getInventoryItems', function(_, cb)
-  sendServerRequest(cb, 'bd_commerce:server:getInventoryItems', nil, 'Server timed out while loading inventory items.')
+RegisterNUICallback('getInventoryItems', function(data, cb)
+  sendServerRequest(cb, 'bd_commerce:server:getInventoryItems', data or {}, 'Server timed out while loading inventory items.')
 end)
 
 RegisterNUICallback('getMySales', function(_, cb)

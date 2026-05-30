@@ -10,7 +10,7 @@ Config.PanelSubtitle = 'System to Sell and Buy items'
 --   ox_inventory:  'ox_inventory/web/images'
 --   qb-inventory:  'qb-inventory/html/images'
 --   ps-inventory:  'ps-inventory/html/images'
-Config.InventoryImagePath = 'qb-inventory/html/images'
+Config.InventoryImagePath = 'ox_inventory/web/images'
 
 -- Percentage fee deducted from each sale payout before seller credit.
 -- The fee amount is deposited to the job society configured in config/society.lua.

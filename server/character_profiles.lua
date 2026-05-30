@@ -226,7 +226,7 @@ function CommerceCharacterProfiles.Search(query)
     if cfg.jsonCol then
       local firstExpr = ("JSON_UNQUOTE(JSON_EXTRACT(%s, '$.%s'))"):format(cfg.jsonCol, cfg.jsonFirstKey)
       local lastExpr = ("JSON_UNQUOTE(JSON_EXTRACT(%s, '$.%s'))"):format(cfg.jsonCol, cfg.jsonLastKey)
-      local matchClause = ('(%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''''), '' '', COALESCE(%s, '''')) LIKE ?)'):format(
+      local matchClause = ("(%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''), ' ', COALESCE(%s, '')) LIKE ?)"):format(
         cfg.idCol,
         firstExpr,
         lastExpr,
@@ -257,7 +257,7 @@ function CommerceCharacterProfiles.Search(query)
       end
     elseif cfg.idLikePattern then
       rows = MySQL.query.await(
-        ('SELECT %s FROM %s WHERE %s LIKE ? AND (%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''''), '' '', COALESCE(%s, '''')) LIKE ?) ORDER BY firstname ASC, lastname ASC LIMIT 200'):format(
+        ("SELECT %s FROM %s WHERE %s LIKE ? AND (%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''), ' ', COALESCE(%s, '')) LIKE ?) ORDER BY firstname ASC, lastname ASC LIMIT 200"):format(
           selectList,
           cfg.table,
           cfg.idCol,
@@ -271,7 +271,7 @@ function CommerceCharacterProfiles.Search(query)
       ) or {}
     else
       rows = MySQL.query.await(
-        ('SELECT %s FROM %s WHERE %s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''''), '' '', COALESCE(%s, '''')) LIKE ? ORDER BY firstname ASC, lastname ASC LIMIT 200'):format(
+        ("SELECT %s FROM %s WHERE %s LIKE ? OR %s LIKE ? OR %s LIKE ? OR CONCAT(COALESCE(%s, ''), ' ', COALESCE(%s, '')) LIKE ? ORDER BY firstname ASC, lastname ASC LIMIT 200"):format(
           selectList,
           cfg.table,
           cfg.idCol,

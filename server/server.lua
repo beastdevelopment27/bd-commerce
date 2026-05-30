@@ -1502,7 +1502,7 @@ CreateThread(function()
   assertSchema()
 end)
 
-RegisterNetEvent('bd_commerce:server:getInventoryItems', function(requestId)
+RegisterNetEvent('bd_commerce:server:getInventoryItems', function(requestId, options)
   local src = source
   local responseEvent = 'bd_commerce:client:getInventoryItemsResult'
 
@@ -1515,11 +1515,16 @@ RegisterNetEvent('bd_commerce:server:getInventoryItems', function(requestId)
     return
   end
 
-  local items = getInventoryCache(src)
+  local forceRefresh = type(options) == 'table' and options.forceRefresh == true
+  if forceRefresh then
+    invalidateInventoryCache(src)
+  end
+
+  local items = (not forceRefresh) and getInventoryCache(src) or nil
   if not items then
     items = getPlayerInventoryItems(src)
     setInventoryCache(src, items)
-    cacheLog(('MISS inventory src=%s'):format(src))
+    cacheLog(forceRefresh and ('REFRESH inventory src=%s'):format(src) or ('MISS inventory src=%s'):format(src))
   else
     cacheLog(('HIT inventory src=%s'):format(src))
   end
