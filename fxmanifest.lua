@@ -31,10 +31,10 @@ files {
 	'web/build/**/*',
 }
 
--- escrow_ignore {
---   'config/config.lua',
---   'config/notifications.lua',
---   'server/sv_discord.lua',
---   'server/sv_society.lua',
---   'server/sv_inventory.lua',
--- }
+escrow_ignore {
+  'config/character_profiles.lua',
+  'config/framework.lua',
+  'config/notifications.lua',
+  'config/settings.lua',
+  'config/society.lua',
+}
